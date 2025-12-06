@@ -1500,6 +1500,14 @@
     // Show update notification toast
     function showUpdateNotification() {
         const fallbackChangelog = {
+            '1.7.3': {
+                title: 'Changelog Fetch & Automated Releases',
+                changes: [
+                    'Changelog now loads from repository JSON with a fallback when remote fetch fails',
+                    'Automated version bump workflow keeps the script version and changelog in sync',
+                    'Publish workflow runs after the bump workflow to produce releases automatically'
+                ]
+            },
             '1.7.0': {
                 title: 'One-Tap Script Updates',
                 changes: [

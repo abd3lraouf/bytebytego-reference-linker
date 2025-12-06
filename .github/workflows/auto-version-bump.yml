@@ -77,6 +77,47 @@ jobs:
           console.log(`Bumped version: ${headerVersion} -> ${newVersion} (tag ${tag})`);
           NODE
 
+      - name: Ensure changelog contains new version
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'changelog.json';
+          const newVersion = process.env.NEW_VERSION;
+
+          if (!newVersion) {
+            throw new Error('Missing NEW_VERSION environment variable');
+          }
+          if (!fs.existsSync(path)) {
+            throw new Error(`Missing changelog file at ${path}`);
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
+          } catch (err) {
+            throw new Error(`Failed to parse changelog JSON: ${err.message}`);
+          }
+
+          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries)) {
+            throw new Error('Changelog must be an object with an "entries" array');
+          }
+
+          const exists = parsed.entries.some(entry => entry && entry.version === newVersion);
+          if (exists) {
+            console.log(`Changelog already contains version ${newVersion}`);
+          } else {
+            parsed.entries.push({
+              version: newVersion,
+              title: `ByteByteGo Reference Linker v${newVersion}`,
+              changes: ['Automated version bump']
+            });
+            fs.writeFileSync(path, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+            console.log(`Added changelog entry for version ${newVersion}`);
+          }
+          NODE
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+
       - name: Show git status
         run: git status --short
 
