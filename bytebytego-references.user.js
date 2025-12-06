@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.5.0
+// @version      1.6.0
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
 // @match        https://bytebytego.com/*
 // @match        https://*.bytebytego.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=bytebytego.com
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // @homepage     https://github.com/abd3lraouf/bytebytego-reference-linker
 // @supportURL   https://github.com/abd3lraouf/bytebytego-reference-linker/issues
@@ -23,6 +24,10 @@
     const references = new Map();
     // Store reference link elements in article for up-arrow navigation
     const referenceLinkLocations = new Map();
+
+    // Script version for update notifications
+    const SCRIPT_VERSION = '1.6.0';
+    const VERSION_KEY = 'bytebytego-refs-version';
 
     // Hover card state
     let hoverCard = null;
@@ -42,17 +47,15 @@
                 position: fixed;
                 z-index: 10000;
                 background: #ffffff;
-                border: 1px solid #e0e3e8;
-                border-radius: 10px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+                border: 1px solid #e1e4e8;
+                border-radius: 8px;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
                 overflow: hidden;
-                width: 340px;
+                max-width: 400px;
                 opacity: 0;
                 visibility: hidden;
-                transform: translateY(6px) scale(0.96);
-                transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-                            transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-                            visibility 0.18s;
+                transform: translateY(4px);
+                transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
                 pointer-events: none;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             }
@@ -60,24 +63,30 @@
             .ref-hover-card.visible {
                 opacity: 1;
                 visibility: visible;
-                transform: translateY(0) scale(1);
+                transform: translateY(0);
                 pointer-events: auto;
             }
 
             .ref-hover-card.above {
-                transform: translateY(-6px) scale(0.96);
+                transform: translateY(-4px);
             }
 
             .ref-hover-card.above.visible {
-                transform: translateY(0) scale(1);
+                transform: translateY(0);
             }
 
+            /* Card with image */
             .ref-card-image-container {
                 position: relative;
                 width: 100%;
-                height: 140px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                overflow: hidden;
+                height: 200px;
+                background: #f6f8fa;
+                border-bottom: 1px solid #e1e4e8;
+                display: none;
+            }
+
+            .ref-card-image-container.has-image {
+                display: block;
             }
 
             .ref-card-image {
@@ -87,71 +96,76 @@
                 display: block;
             }
 
-            .ref-card-image-fallback {
-                width: 100%;
-                height: 100%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            }
-
-            .ref-card-image-fallback img {
-                width: 56px;
-                height: 56px;
-                opacity: 0.95;
-                filter: brightness(0) invert(1);
-            }
-
             .ref-card-badge {
                 position: absolute;
-                top: 10px;
-                left: 10px;
-                background: rgba(0, 0, 0, 0.75);
-                backdrop-filter: blur(8px);
+                top: 8px;
+                right: 8px;
+                background: rgba(0, 0, 0, 0.8);
+                backdrop-filter: blur(4px);
                 color: white;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 600;
-                padding: 4px 9px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
+                padding: 3px 8px;
+                border-radius: 4px;
             }
 
             .ref-card-content {
-                padding: 14px 16px;
+                padding: 12px;
             }
 
-            .ref-card-domain {
+            .ref-hover-card.has-image .ref-card-content {
+                padding: 10px 12px 12px;
+            }
+
+            .ref-card-header {
                 display: flex;
-                align-items: center;
-                gap: 6px;
+                align-items: flex-start;
+                gap: 10px;
                 margin-bottom: 8px;
             }
 
-            .ref-card-favicon {
-                width: 14px;
-                height: 14px;
-                border-radius: 3px;
+            .ref-card-icon {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
                 flex-shrink: 0;
+                object-fit: cover;
+                background: #f6f8fa;
             }
 
-            .ref-card-domain-text {
+            .ref-card-header-text {
+                flex: 1;
+                min-width: 0;
+            }
+
+            .ref-card-domain {
                 font-size: 11px;
                 font-weight: 500;
                 color: #6b7280;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
+                margin-bottom: 2px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
 
-            .ref-card-title {
-                font-size: 13.5px;
+            .ref-card-badge-inline {
+                display: inline-block;
+                background: #6366f1;
+                color: white;
+                font-size: 9px;
                 font-weight: 600;
-                color: #111827;
-                margin-bottom: 10px;
-                line-height: 1.45;
+                padding: 2px 6px;
+                border-radius: 3px;
+                margin-left: 6px;
+                vertical-align: middle;
+            }
+
+            .ref-card-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: #1f2937;
+                line-height: 1.4;
+                margin-bottom: 6px;
                 display: -webkit-box;
                 -webkit-line-clamp: 2;
                 -webkit-box-orient: vertical;
@@ -160,81 +174,76 @@
 
             .ref-card-url {
                 font-size: 11px;
-                font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+                font-family: ui-monospace, 'SF Mono', Monaco, 'Cascadia Code', monospace;
                 color: #6366f1;
-                background: #f5f5ff;
-                padding: 7px 9px;
-                border-radius: 6px;
-                margin-bottom: 12px;
-                word-break: break-all;
-                display: -webkit-box;
-                -webkit-line-clamp: 1;
-                -webkit-box-orient: vertical;
+                background: #f6f8fa;
+                padding: 6px 8px;
+                border-radius: 4px;
+                margin-bottom: 10px;
                 overflow: hidden;
-                line-height: 1.4;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
 
             .ref-card-actions {
                 display: flex;
-                gap: 7px;
+                gap: 6px;
             }
 
             .ref-card-btn {
                 flex: 1;
-                padding: 9px 14px;
-                border-radius: 7px;
-                font-size: 12px;
+                padding: 7px 12px;
+                border-radius: 5px;
+                font-size: 11px;
                 font-weight: 600;
                 cursor: pointer;
-                transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+                transition: all 0.12s ease;
                 text-align: center;
                 text-decoration: none;
                 border: none;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 5px;
+                gap: 4px;
             }
 
             .ref-card-btn-primary {
-                background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+                background: #6366f1;
                 color: white;
-                box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
             }
 
             .ref-card-btn-primary:hover {
-                transform: translateY(-1.5px);
-                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
-            }
-
-            .ref-card-btn-primary:active {
-                transform: translateY(0);
+                background: #4f46e5;
             }
 
             .ref-card-btn-secondary {
                 background: #f3f4f6;
-                color: #374151;
+                color: #4b5563;
                 border: 1px solid #e5e7eb;
             }
 
             .ref-card-btn-secondary:hover {
                 background: #e5e7eb;
-                border-color: #d1d5db;
             }
 
-            /* Dark mode support */
+            /* Dark mode */
             @media (prefers-color-scheme: dark) {
                 .ref-hover-card {
                     background: #1f2937;
                     border-color: #374151;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+                    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
                 }
 
-                .ref-card-image-fallback {
-                    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                .ref-card-image-container {
+                    background: #111827;
+                    border-bottom-color: #374151;
                 }
 
-                .ref-card-domain-text {
+                .ref-card-icon {
+                    background: #111827;
+                }
+
+                .ref-card-domain {
                     color: #9ca3af;
                 }
 
@@ -249,25 +258,199 @@
 
                 .ref-card-btn-secondary {
                     background: #374151;
-                    color: #e5e7eb;
+                    color: #d1d5db;
                     border-color: #4b5563;
                 }
 
                 .ref-card-btn-secondary:hover {
                     background: #4b5563;
-                    border-color: #6b7280;
+                }
+            }
+
+            /* Update notification toast */
+            .bytebytego-update-toast {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                z-index: 100000;
+                background: #ffffff;
+                border: 1px solid #e1e4e8;
+                border-radius: 8px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+                padding: 16px 20px;
+                max-width: 420px;
+                opacity: 0;
+                transform: translateY(20px);
+                transition: opacity 0.3s ease, transform 0.3s ease;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+
+            .bytebytego-update-toast.show {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            .update-toast-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 12px;
+            }
+
+            .update-toast-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #1f2937;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .update-toast-badge {
+                background: #10b981;
+                color: white;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 3px 8px;
+                border-radius: 4px;
+            }
+
+            .update-toast-close {
+                background: none;
+                border: none;
+                color: #6b7280;
+                cursor: pointer;
+                font-size: 20px;
+                line-height: 1;
+                padding: 0;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 4px;
+                transition: background 0.15s;
+            }
+
+            .update-toast-close:hover {
+                background: #f3f4f6;
+            }
+
+            .update-toast-content {
+                font-size: 12px;
+                color: #4b5563;
+                line-height: 1.6;
+            }
+
+            .update-toast-content ul {
+                margin: 8px 0;
+                padding-left: 20px;
+            }
+
+            .update-toast-content li {
+                margin: 4px 0;
+            }
+
+            .update-toast-footer {
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid #e5e7eb;
+                font-size: 11px;
+                color: #6b7280;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .bytebytego-update-toast {
+                    background: #1f2937;
+                    border-color: #374151;
+                    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+                }
+
+                .update-toast-title {
+                    color: #f9fafb;
+                }
+
+                .update-toast-close {
+                    color: #9ca3af;
+                }
+
+                .update-toast-close:hover {
+                    background: #374151;
+                }
+
+                .update-toast-content {
+                    color: #d1d5db;
+                }
+
+                .update-toast-footer {
+                    border-top-color: #374151;
+                    color: #9ca3af;
                 }
             }
         `;
         document.head.appendChild(style);
     }
 
-    // Get OG image for URL (using Google's favicon service with larger size as fallback)
-    function getOGImageUrl(url) {
+    // Fetch OG image from URL
+    async function fetchOGImage(url) {
+        try {
+            // Check if GM_xmlhttpRequest is available
+            if (typeof GM_xmlhttpRequest === 'undefined') {
+                return null;
+            }
+
+            return new Promise((resolve) => {
+                // Set timeout to avoid hanging
+                const timeout = setTimeout(() => resolve(null), 3000);
+
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    timeout: 3000,
+                    onload: (response) => {
+                        clearTimeout(timeout);
+                        const html = response.responseText;
+
+                        // Try to find og:image meta tag
+                        const ogImageMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i) ||
+                                           html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i);
+
+                        if (ogImageMatch && ogImageMatch[1]) {
+                            const imageUrl = ogImageMatch[1];
+                            // Make sure it's a full URL
+                            if (imageUrl.startsWith('http')) {
+                                resolve(imageUrl);
+                            } else if (imageUrl.startsWith('//')) {
+                                resolve('https:' + imageUrl);
+                            } else {
+                                const urlObj = new URL(url);
+                                resolve(urlObj.origin + (imageUrl.startsWith('/') ? '' : '/') + imageUrl);
+                            }
+                        } else {
+                            resolve(null);
+                        }
+                    },
+                    onerror: () => {
+                        clearTimeout(timeout);
+                        resolve(null);
+                    },
+                    ontimeout: () => {
+                        clearTimeout(timeout);
+                        resolve(null);
+                    }
+                });
+            });
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Get better quality icon
+    function getIconUrl(url) {
         try {
             const urlObj = new URL(url);
-            // Use larger favicon as image preview
-            return `https://www.google.com/s2/favicons?sz=128&domain=${urlObj.hostname}`;
+            // Use icon.horse for better quality icons
+            return `https://icon.horse/icon/${urlObj.hostname}`;
         } catch {
             return '';
         }
@@ -281,17 +464,20 @@
         hoverCard.className = 'ref-hover-card';
         hoverCard.innerHTML = `
             <div class="ref-card-image-container">
-                <div class="ref-card-image-fallback">
-                    <img class="ref-card-fallback-icon" src="" alt="" />
-                </div>
+                <img class="ref-card-image" src="" alt="" />
                 <span class="ref-card-badge"></span>
             </div>
             <div class="ref-card-content">
-                <div class="ref-card-domain">
-                    <img class="ref-card-favicon" src="" alt="" />
-                    <span class="ref-card-domain-text"></span>
+                <div class="ref-card-header">
+                    <img class="ref-card-icon" src="" alt="" />
+                    <div class="ref-card-header-text">
+                        <div class="ref-card-domain">
+                            <span class="ref-card-domain-text"></span>
+                            <span class="ref-card-badge-inline"></span>
+                        </div>
+                        <div class="ref-card-title"></div>
+                    </div>
                 </div>
-                <div class="ref-card-title"></div>
                 <div class="ref-card-url"></div>
                 <div class="ref-card-actions">
                     <a class="ref-card-btn ref-card-btn-primary" target="_blank" rel="noopener noreferrer">
@@ -342,7 +528,7 @@
     }
 
     // Show hover card for a reference
-    function showHoverCard(refNum, anchorElement) {
+    async function showHoverCard(refNum, anchorElement) {
         const ref = references.get(refNum);
         if (!ref || !ref.url) return;
 
@@ -350,17 +536,20 @@
 
         const card = createHoverCard();
         const domain = extractDomain(ref.url);
-        const faviconUrl = getFaviconUrl(ref.url);
-        const ogImageUrl = getOGImageUrl(ref.url);
+        const iconUrl = getIconUrl(ref.url);
 
-        // Update card content
+        // Update card content immediately (without image)
         card.querySelector('.ref-card-badge').textContent = `[${refNum}]`;
-        card.querySelector('.ref-card-fallback-icon').src = ogImageUrl;
-        card.querySelector('.ref-card-favicon').src = faviconUrl;
+        card.querySelector('.ref-card-badge-inline').textContent = `[${refNum}]`;
+        card.querySelector('.ref-card-icon').src = iconUrl;
         card.querySelector('.ref-card-domain-text').textContent = domain;
         card.querySelector('.ref-card-title').textContent = ref.description || `Reference ${refNum}`;
         card.querySelector('.ref-card-url').textContent = ref.url;
         card.querySelector('.ref-card-btn-primary').href = ref.url;
+
+        // Remove has-image class initially
+        card.classList.remove('has-image');
+        card.querySelector('.ref-card-image-container').classList.remove('has-image');
 
         // Setup scroll button
         const scrollBtn = card.querySelector('.ref-card-scroll-btn');
@@ -379,7 +568,7 @@
 
         // Position the card
         const rect = anchorElement.getBoundingClientRect();
-        const cardHeight = 280; // Approximate height with image
+        const cardHeight = 240; // Approximate height
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
 
@@ -401,7 +590,7 @@
         left = rect.left;
 
         // Ensure card doesn't go off-screen horizontally
-        const cardWidth = 340;
+        const cardWidth = 400;
         if (left + cardWidth > window.innerWidth - 16) {
             left = window.innerWidth - cardWidth - 16;
         }
@@ -415,6 +604,30 @@
         // Show with animation
         requestAnimationFrame(() => {
             card.classList.add('visible');
+        });
+
+        // Try to fetch OG image asynchronously (don't wait for it)
+        fetchOGImage(ref.url).then(ogImageUrl => {
+            if (ogImageUrl && card.classList.contains('visible')) {
+                const imgElement = card.querySelector('.ref-card-image');
+                const imgContainer = card.querySelector('.ref-card-image-container');
+
+                // Preload image to check if it loads successfully
+                const img = new Image();
+                img.onload = () => {
+                    if (card.classList.contains('visible')) {
+                        imgElement.src = ogImageUrl;
+                        imgContainer.classList.add('has-image');
+                        card.classList.add('has-image');
+                    }
+                };
+                img.onerror = () => {
+                    // Image failed to load, keep compact version
+                };
+                img.src = ogImageUrl;
+            }
+        }).catch(() => {
+            // Failed to fetch OG image, keep compact version
         });
     }
 
@@ -1058,6 +1271,87 @@
         }
     }
 
+    // Show update notification toast
+    function showUpdateNotification() {
+        const changelog = {
+            '1.6.0': {
+                title: 'Compact Preview Cards & OG Images',
+                changes: [
+                    'Redesigned hover card with compact layout (max 400px)',
+                    'Real OG image fetching from referenced URLs',
+                    'Better URL display with proper truncation',
+                    'Adaptive card: shows image only if available',
+                    'Industry-standard link preview design'
+                ]
+            }
+        };
+
+        const toast = document.createElement('div');
+        toast.className = 'bytebytego-update-toast';
+
+        const versionChanges = changelog[SCRIPT_VERSION];
+        if (!versionChanges) return;
+
+        toast.innerHTML = `
+            <div class="update-toast-header">
+                <div class="update-toast-title">
+                    <span>ByteByteGo Reference Linker</span>
+                    <span class="update-toast-badge">v${SCRIPT_VERSION}</span>
+                </div>
+                <button class="update-toast-close" aria-label="Close">×</button>
+            </div>
+            <div class="update-toast-content">
+                <strong>${versionChanges.title}</strong>
+                <ul>
+                    ${versionChanges.changes.map(change => `<li>${change}</li>`).join('')}
+                </ul>
+            </div>
+            <div class="update-toast-footer">
+                Click any reference to see the new preview card!
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Close button
+        toast.querySelector('.update-toast-close').onclick = () => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        };
+
+        // Show with animation
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+
+        // Auto-hide after 10 seconds
+        setTimeout(() => {
+            if (toast.classList.contains('show')) {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, 10000);
+    }
+
+    // Check for updates
+    function checkForUpdates() {
+        try {
+            const lastVersion = localStorage.getItem(VERSION_KEY);
+
+            if (!lastVersion) {
+                // First install
+                localStorage.setItem(VERSION_KEY, SCRIPT_VERSION);
+            } else if (lastVersion !== SCRIPT_VERSION) {
+                // Update detected
+                localStorage.setItem(VERSION_KEY, SCRIPT_VERSION);
+                // Show notification after a short delay to ensure page is ready
+                setTimeout(showUpdateNotification, 2000);
+            }
+        } catch (error) {
+            console.error('[ByteByteGo Refs] Error checking for updates:', error);
+        }
+    }
+
     // Main function
     function processPage() {
         injectStyles();
@@ -1066,6 +1360,9 @@
         addUpArrowsToReferences();
         console.log(`[ByteByteGo Refs] Found ${references.size} references`);
     }
+
+    // Check for updates on load
+    checkForUpdates();
 
     // Initial run with delay to ensure page is loaded
     setTimeout(processPage, 1000);
