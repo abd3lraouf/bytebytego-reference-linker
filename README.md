@@ -5,8 +5,16 @@ A Tampermonkey userscript that enhances ByteByteGo course pages by converting `[
 ## Features
 
 - **Clickable References**: `[1]`, `[2]`, etc. in the text become clickable links that open the referenced URL in a new tab
-- **Quick Navigation**: A `↓` arrow next to each reference scrolls you to the References/Resources section with a highlight effect
-- **Hover Tooltips**: Hover over a reference to see the description
+- **Rich Preview Cards**: Hover over references to see beautiful preview cards with:
+  - Site icon and domain
+  - Reference description
+  - OpenGraph images (when available)
+  - Full URL preview
+  - Quick action buttons
+- **Bidirectional Navigation**:
+  - `↓` arrow next to each reference scrolls to the References/Resources section
+  - `↑` arrow in References section scrolls back to where the reference is used
+- **Update Notifications**: Get notified when the script updates with a changelog toast
 - **Multiple Formats Supported**: Works with various reference formats:
   - `[n] Description: URL`
   - `n. Description URL`
@@ -60,8 +68,10 @@ Coming soon...
 1. Navigate to any ByteByteGo course page
 2. References like `[1]`, `[22]`, etc. will automatically become interactive:
    - **Click the number** to open the referenced URL in a new tab
+   - **Hover over the number** to see a rich preview card with site info, OG image, and description
    - **Click the `↓` arrow** to scroll down to the reference in the Resources/References section
-   - **Hover** to see the reference description
+3. In the References/Resources section:
+   - **Click the `↑` arrow** next to any reference to jump back to where it's mentioned in the article
 
 ## Supported Sites
 
