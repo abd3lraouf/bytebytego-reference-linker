@@ -1,13 +1,19 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
-// @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  Converts [n] reference markers into clickable links on ByteByteGo courses
-// @author       You
+// @namespace    https://github.com/abd3lraouf
+// @version      1.2.0
+// @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
+// @author       abd3lraouf
+// @license      MIT
 // @match        https://bytebytego.com/*
 // @match        https://*.bytebytego.com/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=bytebytego.com
 // @grant        none
 // @run-at       document-idle
+// @homepage     https://github.com/abd3lraouf/bytebytego-reference-linker
+// @supportURL   https://github.com/abd3lraouf/bytebytego-reference-linker/issues
+// @updateURL    https://raw.githubusercontent.com/abd3lraouf/bytebytego-reference-linker/main/bytebytego-references.user.js
+// @downloadURL  https://raw.githubusercontent.com/abd3lraouf/bytebytego-reference-linker/main/bytebytego-references.user.js
 // ==/UserScript==
 
 (function() {
