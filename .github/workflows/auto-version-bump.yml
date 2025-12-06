@@ -20,25 +20,84 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bump userscript version (patch)
+      - name: Bump userscript version from changelog
         id: version
         run: |
           set -euo pipefail
           FILE="bytebytego-references.user.js"
+          CHANGELOG="changelog.json"
 
-          if [ ! -f "$FILE" ]; then
-            echo "Userscript not found at $FILE"
+          if [ ! -f "$CHANGELOG" ]; then
+            echo "Missing changelog file at ${CHANGELOG}"
             exit 1
           fi
 
           node - <<'NODE'
           const fs = require('fs');
 
-          const file = 'bytebytego-references.user.js';
-          const content = fs.readFileSync(file, 'utf8');
+          const changelogPath = 'changelog.json';
+          const scriptPath = 'bytebytego-references.user.js';
 
+          if (!fs.existsSync(changelogPath)) {
+            throw new Error('Missing changelog file at changelog.json');
+          }
+
+          let changelog;
+          try {
+            changelog = JSON.parse(fs.readFileSync(changelogPath, 'utf8'));
+          } catch (err) {
+            throw new Error(`Failed to parse changelog JSON: ${err.message}`);
+          }
+
+          if (!changelog || typeof changelog !== 'object' || !Array.isArray(changelog.entries)) {
+            throw new Error('Missing changelog entries array');
+          }
+
+          let lastEntryVersion = null;
+          let highestVersion = null;
+
+          const parseSemver = (raw) => {
+            if (typeof raw !== 'string') return null;
+            const trimmed = raw.trim();
+            if (!/^\d+(?:\.\d+){0,2}$/.test(trimmed)) return null;
+            const parts = trimmed.split('.').map(p => parseInt(p, 10));
+            while (parts.length < 3) parts.push(0);
+            return { raw: trimmed, parts };
+          };
+
+          const compareParts = (a, b) => {
+            for (let i = 0; i < Math.max(a.length, b.length); i++) {
+              const av = a[i] ?? 0;
+              const bv = b[i] ?? 0;
+              if (av > bv) return 1;
+              if (av < bv) return -1;
+            }
+            return 0;
+          };
+
+          for (const entry of changelog.entries) {
+            if (!entry || !entry.version) continue;
+            const rawVersion = String(entry.version).trim();
+            lastEntryVersion = rawVersion;
+            const parsed = parseSemver(rawVersion);
+            if (!parsed) continue;
+            if (!highestVersion || compareParts(parsed.parts, highestVersion.parts) > 0) {
+              highestVersion = parsed;
+            }
+          }
+
+          const releaseVersion = highestVersion?.raw || lastEntryVersion;
+          if (!releaseVersion) {
+            throw new Error('No version found in changelog');
+          }
+
+          if (!fs.existsSync(scriptPath)) {
+            throw new Error(`Userscript not found at ${scriptPath}`);
+          }
+
+          const content = fs.readFileSync(scriptPath, 'utf8');
           const headerMatch = content.match(/@version\s+([0-9.]+)/);
-          const scriptConstMatch = content.match(/const\s+SCRIPT_VERSION\s*=\s*['"]([0-9.]+)['"]/);
+          const scriptConstMatch = content.match(/const\s+SCRIPT_VERSION\s*=\s*['\"]([0-9.]+)['\"]/);
 
           if (!headerMatch) {
             throw new Error('Could not find @version in userscript header');
@@ -50,31 +109,30 @@ jobs:
           const headerVersion = headerMatch[1].trim();
           const constVersion = scriptConstMatch[1].trim();
 
-          if (headerVersion !== constVersion) {
-            throw new Error(`Header version (${headerVersion}) does not match SCRIPT_VERSION (${constVersion})`);
+          const outputs = [
+            `new_version=${releaseVersion}`,
+            `tag=v${releaseVersion}`
+          ];
+
+          const alreadyCurrent = headerVersion === releaseVersion && constVersion === releaseVersion;
+          outputs.push(`changed=${alreadyCurrent ? 'false' : 'true'}`);
+
+          if (alreadyCurrent) {
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, outputs.join('\n') + '\n');
+            console.log(`Versions already at ${releaseVersion}; no changes needed.`);
+            process.exit(0);
           }
 
-          const parts = headerVersion.split('.').map(p => parseInt(p, 10));
-          if (parts.some(Number.isNaN)) {
-            throw new Error(`Invalid numeric version: ${headerVersion}`);
-          }
-          while (parts.length < 3) parts.push(0);
-          parts[2] += 1;
-          const newVersion = parts.join('.');
+          const updatedHeader = content.replace(/(@version\s+)([0-9.]+)/, `$1${releaseVersion}`);
+          const updatedScript = updatedHeader.replace(/(const\s+SCRIPT_VERSION\s*=\s*['"])([0-9.]+)(['"])/, `$1${releaseVersion}$3`);
 
-          let updated = content.replace(/(@version\s+)([0-9.]+)/, `$1${newVersion}`);
-          const scriptReplace = updated.replace(/(const\s+SCRIPT_VERSION\s*=\s*['"])([0-9.]+)(['"])/, `$1${newVersion}$3`);
-
-          if (updated === content || scriptReplace === updated) {
+          if (updatedScript === content) {
             throw new Error('Version replacements failed');
           }
 
-          fs.writeFileSync(file, scriptReplace, 'utf8');
-
-          const tag = `v${newVersion}`;
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${newVersion}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
-          console.log(`Bumped version: ${headerVersion} -> ${newVersion} (tag ${tag})`);
+          fs.writeFileSync(scriptPath, updatedScript, 'utf8');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, outputs.join('\n') + '\n');
+          console.log(`Updated versions: ${headerVersion}/${constVersion} -> ${releaseVersion}`);
           NODE
 
       - name: Ensure changelog contains new version
@@ -119,23 +177,28 @@ jobs:
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
 
       - name: Show git status
+        if: steps.version.outputs.changed == 'true'
         run: git status --short
 
       - name: Configure git user
+        if: steps.version.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Commit version bump
+        if: steps.version.outputs.changed == 'true'
         run: |
           git add bytebytego-references.user.js
           git commit -m "chore: bump userscript version to v${{ steps.version.outputs.new_version }}"
 
       - name: Tag release version
+        if: steps.version.outputs.changed == 'true'
         run: |
           git tag ${{ steps.version.outputs.tag }}
 
       - name: Push commit and tag
+        if: steps.version.outputs.changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
