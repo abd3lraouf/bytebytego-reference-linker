@@ -90,6 +90,14 @@ Coming soon...
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Release process
+
+- `changelog.json` defines the next version; auto-version-bump on `main` reads it and syncs `@version`/`SCRIPT_VERSION`.
+- The bump workflow commits the userscript and tags `v<version>` on `main`.
+- `publish-userscript` runs on tag pushes or after the bump workflow to create the release with the install badge, changelog details, and generated notes.
+- The install link comes from the release asset; the userscript auto-checks the remote version to prompt users to update.
+<!-- ... existing code ... -->
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.

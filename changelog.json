@@ -1,6 +1,15 @@
 {
   "entries": [
     {
+      "version": "1.7.5",
+      "title": "Test release for update checks",
+      "changes": [
+        "Validate autoupdate toast against a new release entry",
+        "Exercise changelog-driven release notes pipeline",
+        "Dummy release for end-to-end verification"
+      ]
+    },
+    {
       "version": "1.7.4",
       "title": "Stabilize navigation and changelog release notes",
       "changes": [
@@ -24,7 +33,7 @@
       "changes": [
         "New toast prompts you to install updates immediately",
         "Automatic once-daily checks for newer script versions",
-        "Update button opens the latest script so you stay current"
+        "Update button opens the latest improvements without leaving the page"
       ]
     }
   ]
