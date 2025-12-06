@@ -78,6 +78,7 @@ jobs:
         id: notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
@@ -133,7 +134,7 @@ jobs:
           )"
 
           {
-            echo "body<<'EOF'"
+            echo "body<<EOF"
             printf "%s\n\n" "$INSTALL_BADGE"
             if [ -n "$CHANGELOG_SECTION" ]; then
               printf "%s\n\n" "$CHANGELOG_SECTION"
