@@ -79,11 +79,66 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          INSTALL_LINK="[▶️ Install / Update](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/bytebytego-references.user.js)"
-          NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes -f tag_name="${{ steps.version.outputs.tag }}" -f target_commitish="${{ github.sha }}" --jq '.body')
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          INSTALL_BADGE="[![Install / Update](https://img.shields.io/badge/Install%20%2F%20Update-Userscript-brightgreen?logo=google-chrome&logoColor=white)](https://github.com/${{ github.repository }}/releases/download/${TAG}/bytebytego-references.user.js)"
+          NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes -f tag_name="${TAG}" -f target_commitish="${{ github.sha }}" --jq '.body')
+          CHANGELOG_SECTION="$(node - <<'NODE'
+          const fs = require('fs');
+
+          const version = process.env.VERSION;
+          const changelogPath = 'changelog.json';
+          const noEntry = () => { process.exit(0); };
+
+          if (!version) {
+            console.error('WARN: Missing VERSION env for changelog lookup');
+            noEntry();
+          }
+
+          let data;
+          try {
+            const raw = fs.readFileSync(changelogPath, 'utf8');
+            data = JSON.parse(raw);
+          } catch (err) {
+            console.error(`WARN: Unable to read/parse changelog: ${err.message}`);
+            noEntry();
+          }
+
+          let entries = [];
+          if (Array.isArray(data)) {
+            entries = data;
+          } else if (data && typeof data === 'object' && Array.isArray(data.entries)) {
+            entries = data.entries;
+          } else {
+            console.error('WARN: Changelog missing entries array');
+            noEntry();
+          }
+
+          const entry = entries.find(item => item && item.version === version);
+          if (!entry) {
+            console.error(`WARN: No changelog entry found for v${version}`);
+            noEntry();
+          }
+
+          let section = `## What's New (v${version})\n`;
+          if (entry.title) {
+            section += `**${entry.title}**\n\n`;
+          }
+          if (Array.isArray(entry.changes) && entry.changes.length) {
+            section += entry.changes.map(c => `- ${c}`).join('\n');
+          }
+          console.log(section.trimEnd());
+          NODE
+          )"
+
           {
-            echo "body<<EOF"
-            printf "%s\n\n%s\n" "$INSTALL_LINK" "$NOTES"
+            echo "body<<'EOF'"
+            printf "%s\n\n" "$INSTALL_BADGE"
+            if [ -n "$CHANGELOG_SECTION" ]; then
+              printf "%s\n\n" "$CHANGELOG_SECTION"
+            fi
+            printf "## Release Notes (auto)\n%s\n" "$NOTES"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
