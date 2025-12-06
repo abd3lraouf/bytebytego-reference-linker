@@ -1,0 +1,95 @@
+name: Publish Userscript
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version and tag
+        id: version
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'bytebytego-references.user.js';
+          if (!fs.existsSync(path)) {
+              console.error(`Missing userscript: ${path}`);
+              process.exit(1);
+          }
+          const content = fs.readFileSync(path, 'utf8');
+          const match = content.match(/@version\s+([0-9.]+)/);
+          if (!match) {
+              console.error('Could not find @version in userscript header');
+              process.exit(1);
+          }
+          const version = match[1].trim();
+          const tag = `v${version}`;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
+          console.log(`Extracted version ${version}, tag ${tag}`);
+          NODE
+
+      - name: Validate pushed tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if [ "${{ github.ref_name }}" != "${{ steps.version.outputs.tag }}" ]; then
+            echo "Pushed tag '${{ github.ref_name }}' does not match extracted tag '${{ steps.version.outputs.tag }}'"
+            exit 1
+          fi
+
+      - name: Check for existing release
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release '${{ steps.version.outputs.tag }}' already exists. Skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package userscript asset
+        if: steps.guard.outputs.skip != 'true'
+        id: package
+        run: |
+          ASSET_PATH="bytebytego-references.user.js"
+          ASSET_NAME="bytebytego-references.user.js"
+          echo "asset_path=${ASSET_PATH}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release body with install link and generated notes
+        if: steps.guard.outputs.skip != 'true'
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INSTALL_LINK="[▶️ Install / Update](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/bytebytego-references.user.js)"
+          NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes -f tag_name="${{ steps.version.outputs.tag }}" -f target_commitish="${{ github.sha }}" --jq '.body')
+          {
+            echo "body<<EOF"
+            printf "%s\n\n%s\n" "$INSTALL_LINK" "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.guard.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ByteByteGo Reference Linker v${{ steps.version.outputs.version }}
+          body: ${{ steps.notes.outputs.body }}
+          files: ${{ steps.package.outputs.asset_path }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
