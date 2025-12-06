@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.6.2
+// @version      1.7.0
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -9,6 +9,7 @@
 // @match        https://*.bytebytego.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=bytebytego.com
 // @grant        GM_xmlhttpRequest
+// @grant        GM_openInTab
 // @connect      *
 // @run-at       document-idle
 // @homepage     https://github.com/abd3lraouf/bytebytego-reference-linker
@@ -26,8 +27,11 @@
     const referenceLinkLocations = new Map();
 
     // Script version for update notifications
-    const SCRIPT_VERSION = '1.6.2';
+    const SCRIPT_VERSION = '1.7.0';
     const VERSION_KEY = 'bytebytego-refs-version';
+    const LAST_UPDATE_CHECK_KEY = 'bytebytego-refs-last-update-check';
+    const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const SCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/abd3lraouf/bytebytego-reference-linker/main/bytebytego-references.user.js';
 
     // Hover card state
     let hoverCard = null;
@@ -351,6 +355,43 @@
                 margin: 4px 0;
             }
 
+            .update-toast-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 12px;
+            }
+
+            .update-toast-btn {
+                flex: 1;
+                border: none;
+                padding: 9px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+            }
+
+            .update-toast-btn.primary {
+                background: #10b981;
+                color: #ffffff;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 1px 8px rgba(16, 185, 129, 0.3);
+            }
+
+            .update-toast-btn.primary:hover {
+                background: #0ea371;
+            }
+
+            .update-toast-btn.secondary {
+                background: #f3f4f6;
+                color: #374151;
+                border: 1px solid #e5e7eb;
+            }
+
+            .update-toast-btn.secondary:hover {
+                background: #e5e7eb;
+            }
+
             .update-toast-footer {
                 margin-top: 12px;
                 padding-top: 12px;
@@ -380,6 +421,16 @@
 
                 .update-toast-content {
                     color: #d1d5db;
+                }
+
+                .update-toast-btn.secondary {
+                    background: #374151;
+                    border-color: #4b5563;
+                    color: #e5e7eb;
+                }
+
+                .update-toast-btn.secondary:hover {
+                    background: #4b5563;
                 }
 
                 .update-toast-footer {
@@ -1291,9 +1342,146 @@
         }
     }
 
+    function compareVersions(versionA, versionB) {
+        const toParts = (version) => version.split('.').map((part) => parseInt(part, 10) || 0);
+        const partsA = toParts(versionA);
+        const partsB = toParts(versionB);
+        const maxLength = Math.max(partsA.length, partsB.length);
+
+        for (let i = 0; i < maxLength; i++) {
+            const a = partsA[i] || 0;
+            const b = partsB[i] || 0;
+
+            if (a > b) return 1;
+            if (a < b) return -1;
+        }
+
+        return 0;
+    }
+
+    function extractVersionFromScript(scriptText) {
+        const match = scriptText.match(/@version\s+([0-9.]+)/);
+        return match ? match[1] : null;
+    }
+
+    function fetchLatestVersion() {
+        return new Promise((resolve) => {
+            // If we cannot make the cross-origin request, bail early
+            if (typeof GM_xmlhttpRequest === 'undefined') {
+                resolve(null);
+                return;
+            }
+
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: SCRIPT_UPDATE_URL,
+                timeout: 6000,
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(extractVersionFromScript(response.responseText));
+                    } else {
+                        resolve(null);
+                    }
+                },
+                onerror: () => resolve(null),
+                ontimeout: () => resolve(null)
+            });
+        });
+    }
+
+    function openUpdatePage() {
+        if (typeof GM_openInTab !== 'undefined') {
+            GM_openInTab(SCRIPT_UPDATE_URL, { active: true, insert: true });
+        } else {
+            window.open(SCRIPT_UPDATE_URL, '_blank');
+        }
+    }
+
+    function showUpdatePrompt(latestVersion) {
+        if (document.querySelector('.bytebytego-update-toast.update-available')) {
+            return;
+        }
+
+        const toast = document.createElement('div');
+        toast.className = 'bytebytego-update-toast update-available';
+
+        toast.innerHTML = `
+            <div class="update-toast-header">
+                <div class="update-toast-title">
+                    <span>New version available</span>
+                    <span class="update-toast-badge">v${latestVersion}</span>
+                </div>
+                <button class="update-toast-close" aria-label="Close">×</button>
+            </div>
+            <div class="update-toast-content">
+                <strong>Update ByteByteGo Reference Linker</strong>
+                <p>Tap update to install the latest improvements without leaving the page.</p>
+            </div>
+            <div class="update-toast-actions">
+                <button class="update-toast-btn secondary" type="button">Later</button>
+                <button class="update-toast-btn primary" type="button">Update</button>
+            </div>
+            <div class="update-toast-footer">
+                Current: v${SCRIPT_VERSION} · Latest: v${latestVersion}
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        const [laterBtn, updateBtn] = toast.querySelectorAll('.update-toast-btn');
+
+        const closeToast = () => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 250);
+        };
+
+        toast.querySelector('.update-toast-close').onclick = closeToast;
+        laterBtn.onclick = closeToast;
+
+        updateBtn.onclick = () => {
+            updateBtn.textContent = 'Updating...';
+            updateBtn.disabled = true;
+            laterBtn.disabled = true;
+            openUpdatePage();
+            setTimeout(closeToast, 600);
+        };
+
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+    }
+
+    async function checkForScriptUpdate() {
+        try {
+            const lastCheck = parseInt(localStorage.getItem(LAST_UPDATE_CHECK_KEY) || '0', 10);
+            const now = Date.now();
+
+            if (lastCheck && now - lastCheck < UPDATE_CHECK_INTERVAL) {
+                return;
+            }
+
+            const latestVersion = await fetchLatestVersion();
+            localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(now));
+
+            if (latestVersion && compareVersions(latestVersion, SCRIPT_VERSION) > 0) {
+                showUpdatePrompt(latestVersion);
+            }
+        } catch (error) {
+            console.error('[ByteByteGo Refs] Error checking for remote updates:', error);
+        }
+    }
+
     // Show update notification toast
     function showUpdateNotification() {
         const changelog = {
+            '1.7.0': {
+                title: 'One-Tap Script Updates',
+                changes: [
+                    'New toast prompts you to install updates immediately',
+                    'Automatic once-daily checks for newer script versions',
+                    'Update button opens the latest script so you stay current'
+                ]
+            },
             '1.6.2': {
                 title: 'Up Arrow Navigation - Completely Fixed!',
                 changes: [
@@ -1402,6 +1590,7 @@
 
     // Check for updates on load
     checkForUpdates();
+    checkForScriptUpdate();
 
     // Initial run with delay to ensure page is loaded
     setTimeout(processPage, 1000);
