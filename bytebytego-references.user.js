@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.7.1
+// @version      1.7.2
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -27,7 +27,7 @@
     const referenceLinkLocations = new Map();
 
     // Script version for update notifications
-    const SCRIPT_VERSION = '1.7.1';
+    const SCRIPT_VERSION = '1.7.2';
     const VERSION_KEY = 'bytebytego-refs-version';
     const LAST_UPDATE_CHECK_KEY = 'bytebytego-refs-last-update-check';
     const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
