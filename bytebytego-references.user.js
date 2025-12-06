@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.2.0
+// @version      1.3.0
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -22,9 +22,70 @@
     // Store parsed references
     const references = new Map();
 
+    // Wrap each reference line in Resources section with a span for precise highlighting
+    function wrapReferencesWithSpans() {
+        const resourcesHeader = getResourcesHeader();
+        if (!resourcesHeader) return;
+
+        let sibling = resourcesHeader.nextElementSibling;
+        while (sibling) {
+            // Stop if we hit another header
+            if (sibling.tagName && sibling.tagName.match(/^H[1-6]$/)) break;
+
+            // Check if this element contains multiple references separated by <br>
+            if ((sibling.tagName === 'P' || sibling.tagName === 'DIV') && sibling.innerHTML.includes('<br>')) {
+                const html = sibling.innerHTML;
+                // Check if it has reference patterns
+                if (/\[\d+\]/.test(html) || /^\d+\./.test(html)) {
+                    // Split by <br> and wrap each reference line
+                    const newHtml = html.replace(
+                        /(\[(\d+)\][^<]*<a[^>]*>[^<]*<\/a>[^<]*?)(<br\s*\/?>|$)/gi,
+                        (match, content, num, br) => {
+                            return `<span class="ref-line" data-ref="${num}">${content}</span>${br}`;
+                        }
+                    ).replace(
+                        /((?:^|>)(\d+)\.[^<]*<a[^>]*>[^<]*<\/a>[^<]*?)(<br\s*\/?>|$)/gi,
+                        (match, content, num, br) => {
+                            return `<span class="ref-line" data-ref="${num}">${content}</span>${br}`;
+                        }
+                    );
+                    sibling.innerHTML = newHtml;
+                }
+            }
+
+            sibling = sibling.nextElementSibling;
+        }
+    }
+
     // Parse references from the bottom of the page
     function parseReferences() {
         references.clear();
+
+        // First, wrap references with spans for precise targeting
+        wrapReferencesWithSpans();
+
+        // Check for wrapped spans first (most precise)
+        document.querySelectorAll('.ref-line[data-ref]').forEach(span => {
+            const num = span.dataset.ref;
+            if (!references.has(num)) {
+                const linkElement = span.querySelector('a[href]');
+                const url = linkElement ? linkElement.href : null;
+
+                // Get description (text before the link)
+                let description = '';
+                const textContent = span.textContent;
+                const match = textContent.match(/^\[?\d+\]?:?\s*(.+?)(?:https?:|$)/);
+                if (match) {
+                    description = match[1].trim().replace(/:?\s*$/, '');
+                }
+
+                references.set(num, {
+                    description: description || `Reference ${num}`,
+                    url: url,
+                    element: span
+                });
+            }
+        });
 
         // Find all text nodes that start with [n], [n]:, or n. pattern
         const walker = document.createTreeWalker(
@@ -45,6 +106,8 @@
 
             if (match) {
                 const num = match[1] || match[2]; // Get number from either format
+                if (references.has(num)) continue; // Skip if already found
+
                 let description = (match[3] || '').trim();
                 let url = null;
 
@@ -83,8 +146,8 @@
             }
         }
 
-        // Second pass: parse from innerHTML for elements containing multiple references
-        // This handles the case where all refs are in a single <p> tag
+        // Additional pass: parse from innerHTML for elements containing multiple references
+        // This handles cases not caught above
         document.querySelectorAll('p, div').forEach(container => {
             const html = container.innerHTML;
 
@@ -98,10 +161,13 @@
                     let description = match[2].trim().replace(/:?\s*$/, '');
                     const url = match[3];
 
+                    // Try to find a specific span for this reference
+                    let element = container.querySelector(`.ref-line[data-ref="${num}"]`) || container;
+
                     references.set(num, {
                         description: description || `Reference ${num}`,
                         url: url,
-                        element: container
+                        element: element
                     });
                 }
             }
@@ -115,10 +181,13 @@
                     let description = match[2].trim().replace(/:?\s*$/, '');
                     const url = match[3];
 
+                    // Try to find a specific span for this reference
+                    let element = container.querySelector(`.ref-line[data-ref="${num}"]`) || container;
+
                     references.set(num, {
                         description: description || `Reference ${num}`,
                         url: url,
-                        element: container
+                        element: element
                     });
                 }
             }
