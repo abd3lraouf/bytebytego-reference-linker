@@ -1500,6 +1500,14 @@
     // Show update notification toast
     function showUpdateNotification() {
         const fallbackChangelog = {
+            '1.7.4': {
+                title: 'Stabilize navigation and changelog release notes',
+                changes: [
+                    'Improve up/down navigation reliability across dynamic pages',
+                    'Ensure release notes pull from repository changelog with badge install link',
+                    'Automated bump and publish workflows run end-to-end from main'
+                ]
+            },
             '1.7.3': {
                 title: 'Changelog Fetch & Automated Releases',
                 changes: [
