@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.3.0
+// @version      1.4.0
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -21,6 +21,331 @@
 
     // Store parsed references
     const references = new Map();
+
+    // Hover card state
+    let hoverCard = null;
+    let hoverTimeout = null;
+    let hideTimeout = null;
+
+    // Inject styles for hover card
+    function injectStyles() {
+        if (document.getElementById('bytebytego-ref-styles')) return;
+
+        const style = document.createElement('style');
+        style.id = 'bytebytego-ref-styles';
+        style.textContent = `
+            .ref-hover-card {
+                position: fixed;
+                z-index: 10000;
+                background: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
+                padding: 16px;
+                max-width: 400px;
+                min-width: 300px;
+                opacity: 0;
+                visibility: hidden;
+                transform: translateY(8px);
+                transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+                pointer-events: none;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+
+            .ref-hover-card.visible {
+                opacity: 1;
+                visibility: visible;
+                transform: translateY(0);
+                pointer-events: auto;
+            }
+
+            .ref-hover-card.above {
+                transform: translateY(-8px);
+            }
+
+            .ref-hover-card.above.visible {
+                transform: translateY(0);
+            }
+
+            .ref-card-header {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 12px;
+            }
+
+            .ref-card-number {
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 4px 10px;
+                border-radius: 6px;
+                flex-shrink: 0;
+            }
+
+            .ref-card-domain {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                color: #6b7280;
+                font-size: 12px;
+                overflow: hidden;
+            }
+
+            .ref-card-favicon {
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                flex-shrink: 0;
+            }
+
+            .ref-card-domain-text {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .ref-card-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #1f2937;
+                margin-bottom: 8px;
+                line-height: 1.4;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            .ref-card-url {
+                font-size: 12px;
+                color: #3b82f6;
+                word-break: break-all;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                line-height: 1.4;
+                padding: 8px;
+                background: #f3f4f6;
+                border-radius: 6px;
+                margin-bottom: 12px;
+            }
+
+            .ref-card-actions {
+                display: flex;
+                gap: 8px;
+            }
+
+            .ref-card-btn {
+                flex: 1;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.15s ease;
+                text-align: center;
+                text-decoration: none;
+                border: none;
+            }
+
+            .ref-card-btn-primary {
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                color: white;
+            }
+
+            .ref-card-btn-primary:hover {
+                background: linear-gradient(135deg, #2563eb, #1d4ed8);
+                transform: translateY(-1px);
+            }
+
+            .ref-card-btn-secondary {
+                background: #f3f4f6;
+                color: #4b5563;
+            }
+
+            .ref-card-btn-secondary:hover {
+                background: #e5e7eb;
+            }
+
+            /* Dark mode support */
+            @media (prefers-color-scheme: dark) {
+                .ref-hover-card {
+                    background: #1f2937;
+                    border-color: #374151;
+                }
+
+                .ref-card-title {
+                    color: #f3f4f6;
+                }
+
+                .ref-card-domain {
+                    color: #9ca3af;
+                }
+
+                .ref-card-url {
+                    background: #374151;
+                    color: #60a5fa;
+                }
+
+                .ref-card-btn-secondary {
+                    background: #374151;
+                    color: #d1d5db;
+                }
+
+                .ref-card-btn-secondary:hover {
+                    background: #4b5563;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Create hover card element
+    function createHoverCard() {
+        if (hoverCard) return hoverCard;
+
+        hoverCard = document.createElement('div');
+        hoverCard.className = 'ref-hover-card';
+        hoverCard.innerHTML = `
+            <div class="ref-card-header">
+                <span class="ref-card-number"></span>
+                <div class="ref-card-domain">
+                    <img class="ref-card-favicon" src="" alt="" />
+                    <span class="ref-card-domain-text"></span>
+                </div>
+            </div>
+            <div class="ref-card-title"></div>
+            <div class="ref-card-url"></div>
+            <div class="ref-card-actions">
+                <a class="ref-card-btn ref-card-btn-primary" target="_blank" rel="noopener noreferrer">Open Link ↗</a>
+                <button class="ref-card-btn ref-card-btn-secondary ref-card-scroll-btn">Scroll to Ref ↓</button>
+            </div>
+        `;
+
+        // Keep card visible when hovering over it
+        hoverCard.addEventListener('mouseenter', () => {
+            clearTimeout(hideTimeout);
+        });
+
+        hoverCard.addEventListener('mouseleave', () => {
+            hideHoverCard();
+        });
+
+        document.body.appendChild(hoverCard);
+        return hoverCard;
+    }
+
+    // Extract domain from URL
+    function extractDomain(url) {
+        try {
+            const urlObj = new URL(url);
+            return urlObj.hostname.replace('www.', '');
+        } catch {
+            return url;
+        }
+    }
+
+    // Get favicon URL for domain
+    function getFaviconUrl(url) {
+        try {
+            const urlObj = new URL(url);
+            return `https://www.google.com/s2/favicons?sz=32&domain=${urlObj.hostname}`;
+        } catch {
+            return '';
+        }
+    }
+
+    // Show hover card for a reference
+    function showHoverCard(refNum, anchorElement) {
+        const ref = references.get(refNum);
+        if (!ref || !ref.url) return;
+
+        clearTimeout(hideTimeout);
+
+        const card = createHoverCard();
+        const domain = extractDomain(ref.url);
+        const faviconUrl = getFaviconUrl(ref.url);
+
+        // Update card content
+        card.querySelector('.ref-card-number').textContent = `[${refNum}]`;
+        card.querySelector('.ref-card-favicon').src = faviconUrl;
+        card.querySelector('.ref-card-domain-text').textContent = domain;
+        card.querySelector('.ref-card-title').textContent = ref.description || `Reference ${refNum}`;
+        card.querySelector('.ref-card-url').textContent = ref.url;
+        card.querySelector('.ref-card-btn-primary').href = ref.url;
+
+        // Setup scroll button
+        const scrollBtn = card.querySelector('.ref-card-scroll-btn');
+        scrollBtn.onclick = () => {
+            hideHoverCard(true);
+            if (ref.element) {
+                ref.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const originalBg = ref.element.style.backgroundColor;
+                ref.element.style.backgroundColor = '#fef08a';
+                ref.element.style.transition = 'background-color 0.3s';
+                setTimeout(() => {
+                    ref.element.style.backgroundColor = originalBg;
+                }, 2000);
+            }
+        };
+
+        // Position the card
+        const rect = anchorElement.getBoundingClientRect();
+        const cardHeight = 200; // Approximate height
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+
+        card.classList.remove('above');
+
+        let top, left;
+
+        // Determine vertical position
+        if (spaceBelow >= cardHeight || spaceBelow >= spaceAbove) {
+            // Position below
+            top = rect.bottom + 8;
+        } else {
+            // Position above
+            top = rect.top - cardHeight - 8;
+            card.classList.add('above');
+        }
+
+        // Determine horizontal position
+        left = rect.left;
+
+        // Ensure card doesn't go off-screen horizontally
+        const cardWidth = 350;
+        if (left + cardWidth > window.innerWidth - 16) {
+            left = window.innerWidth - cardWidth - 16;
+        }
+        if (left < 16) {
+            left = 16;
+        }
+
+        card.style.top = `${top}px`;
+        card.style.left = `${left}px`;
+
+        // Show with animation
+        requestAnimationFrame(() => {
+            card.classList.add('visible');
+        });
+    }
+
+    // Hide hover card
+    function hideHoverCard(immediate = false) {
+        if (!hoverCard) return;
+
+        if (immediate) {
+            hoverCard.classList.remove('visible');
+            return;
+        }
+
+        hideTimeout = setTimeout(() => {
+            hoverCard.classList.remove('visible');
+        }, 150);
+    }
 
     // Wrap each reference line in Resources section with a span for precise highlighting
     function wrapReferencesWithSpans() {
@@ -360,11 +685,18 @@
                     transition: background-color 0.2s;
                 `;
 
+                // Hover events for card popup
                 link.addEventListener('mouseenter', () => {
                     link.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = setTimeout(() => {
+                        showHoverCard(num, wrapper);
+                    }, 300); // Delay to prevent flickering
                 });
                 link.addEventListener('mouseleave', () => {
                     link.style.backgroundColor = '';
+                    clearTimeout(hoverTimeout);
+                    hideHoverCard();
                 });
 
                 // Create down arrow button to scroll to reference
@@ -490,6 +822,7 @@
 
     // Main function
     function processPage() {
+        injectStyles();
         parseReferences();
         linkifyReferences();
         console.log(`[ByteByteGo Refs] Found ${references.size} references`);
