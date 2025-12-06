@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.6.1
+// @version      1.6.2
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -26,7 +26,7 @@
     const referenceLinkLocations = new Map();
 
     // Script version for update notifications
-    const SCRIPT_VERSION = '1.6.1';
+    const SCRIPT_VERSION = '1.6.2';
     const VERSION_KEY = 'bytebytego-refs-version';
 
     // Hover card state
@@ -963,6 +963,7 @@
                 // Create wrapper span for link + arrow
                 const wrapper = document.createElement('span');
                 wrapper.className = 'ref-link-wrapper';
+                wrapper.setAttribute('data-ref-link', num); // Add unique identifier
                 wrapper.style.cssText = 'display: inline-flex; align-items: center; gap: 1px;';
 
                 // Create the main link element
@@ -1123,10 +1124,8 @@
                 wrapper.appendChild(arrowBtn);
                 fragment.appendChild(wrapper);
 
-                // Store first occurrence of this reference link for up-arrow navigation
-                if (!referenceLinkLocations.has(num)) {
-                    referenceLinkLocations.set(num, wrapper);
-                }
+                // Note: Reference location is tracked via data-ref-link attribute
+                // which is more reliable than storing DOM elements
 
                 lastIndex = markerPattern.lastIndex;
             }
@@ -1153,9 +1152,11 @@
             if (span.querySelector('.ref-up-arrow')) return;
 
             const num = span.dataset.ref;
-            const linkLocation = referenceLinkLocations.get(num);
 
-            if (linkLocation) {
+            // Check if this reference exists in the article
+            const refLinkExists = document.querySelector(`[data-ref-link="${num}"]`);
+
+            if (refLinkExists) {
                 // Create up arrow button
                 const upArrow = document.createElement('span');
                 upArrow.className = 'ref-up-arrow';
@@ -1187,18 +1188,24 @@
                     e.preventDefault();
                     e.stopPropagation();
 
-                    // Scroll to the link location in article
-                    linkLocation.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Find the reference link in the article dynamically
+                    const refLinkWrapper = document.querySelector(`[data-ref-link="${num}"]`);
+                    if (refLinkWrapper) {
+                        // Scroll to the link location in article
+                        refLinkWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                    // Highlight effect
-                    const link = linkLocation.querySelector('.ref-link');
-                    if (link) {
-                        const originalBg = link.style.backgroundColor;
-                        link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-                        link.style.transition = 'background-color 0.3s';
-                        setTimeout(() => {
-                            link.style.backgroundColor = originalBg;
-                        }, 1500);
+                        // Highlight effect
+                        const link = refLinkWrapper.querySelector('.ref-link');
+                        if (link) {
+                            const originalBg = link.style.backgroundColor;
+                            link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                            link.style.transition = 'background-color 0.3s';
+                            setTimeout(() => {
+                                link.style.backgroundColor = originalBg;
+                            }, 1500);
+                        }
+                    } else {
+                        console.warn(`[ByteByteGo Refs] Could not find reference [${num}] in article`);
                     }
                 });
 
@@ -1219,9 +1226,11 @@
                         if (li.querySelector('.ref-up-arrow')) return;
 
                         const num = String(index + 1);
-                        const linkLocation = referenceLinkLocations.get(num);
 
-                        if (linkLocation) {
+                        // Check if this reference exists in the article
+                        const refLinkExists = document.querySelector(`[data-ref-link="${num}"]`);
+
+                        if (refLinkExists) {
                             const upArrow = document.createElement('span');
                             upArrow.className = 'ref-up-arrow';
                             upArrow.textContent = ' ↑';
@@ -1252,16 +1261,22 @@
                                 e.preventDefault();
                                 e.stopPropagation();
 
-                                linkLocation.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // Find the reference link in the article dynamically
+                                const refLinkWrapper = document.querySelector(`[data-ref-link="${num}"]`);
+                                if (refLinkWrapper) {
+                                    refLinkWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                                const link = linkLocation.querySelector('.ref-link');
-                                if (link) {
-                                    const originalBg = link.style.backgroundColor;
-                                    link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-                                    link.style.transition = 'background-color 0.3s';
-                                    setTimeout(() => {
-                                        link.style.backgroundColor = originalBg;
-                                    }, 1500);
+                                    const link = refLinkWrapper.querySelector('.ref-link');
+                                    if (link) {
+                                        const originalBg = link.style.backgroundColor;
+                                        link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                                        link.style.transition = 'background-color 0.3s';
+                                        setTimeout(() => {
+                                            link.style.backgroundColor = originalBg;
+                                        }, 1500);
+                                    }
+                                } else {
+                                    console.warn(`[ByteByteGo Refs] Could not find reference [${num}] in article`);
                                 }
                             });
 
@@ -1279,6 +1294,16 @@
     // Show update notification toast
     function showUpdateNotification() {
         const changelog = {
+            '1.6.2': {
+                title: 'Up Arrow Navigation - Completely Fixed!',
+                changes: [
+                    'Complete rewrite of up arrow navigation system',
+                    'Uses data-ref-link attributes for reliable tracking',
+                    'No longer depends on stored DOM elements',
+                    'Works perfectly even with dynamic page changes',
+                    'Added helpful console warnings if references not found'
+                ]
+            },
             '1.6.1': {
                 title: 'Bug Fixes & Improvements',
                 changes: [
