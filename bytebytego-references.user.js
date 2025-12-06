@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.4.0
+// @version      1.5.0
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -21,11 +21,15 @@
 
     // Store parsed references
     const references = new Map();
+    // Store reference link elements in article for up-arrow navigation
+    const referenceLinkLocations = new Map();
 
     // Hover card state
     let hoverCard = null;
     let hoverTimeout = null;
     let hideTimeout = null;
+    let currentHoveredLink = null;
+    let isHoveringCard = false;
 
     // Inject styles for hover card
     function injectStyles() {
@@ -38,80 +42,116 @@
                 position: fixed;
                 z-index: 10000;
                 background: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
-                padding: 16px;
-                max-width: 400px;
-                min-width: 300px;
+                border: 1px solid #e0e3e8;
+                border-radius: 10px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+                overflow: hidden;
+                width: 340px;
                 opacity: 0;
                 visibility: hidden;
-                transform: translateY(8px);
-                transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+                transform: translateY(6px) scale(0.96);
+                transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                            transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+                            visibility 0.18s;
                 pointer-events: none;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             }
 
             .ref-hover-card.visible {
                 opacity: 1;
                 visibility: visible;
-                transform: translateY(0);
+                transform: translateY(0) scale(1);
                 pointer-events: auto;
             }
 
             .ref-hover-card.above {
-                transform: translateY(-8px);
+                transform: translateY(-6px) scale(0.96);
             }
 
             .ref-hover-card.above.visible {
-                transform: translateY(0);
+                transform: translateY(0) scale(1);
             }
 
-            .ref-card-header {
+            .ref-card-image-container {
+                position: relative;
+                width: 100%;
+                height: 140px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                overflow: hidden;
+            }
+
+            .ref-card-image {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
+
+            .ref-card-image-fallback {
+                width: 100%;
+                height: 100%;
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                margin-bottom: 12px;
+                justify-content: center;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             }
 
-            .ref-card-number {
-                background: linear-gradient(135deg, #3b82f6, #2563eb);
+            .ref-card-image-fallback img {
+                width: 56px;
+                height: 56px;
+                opacity: 0.95;
+                filter: brightness(0) invert(1);
+            }
+
+            .ref-card-badge {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background: rgba(0, 0, 0, 0.75);
+                backdrop-filter: blur(8px);
                 color: white;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
-                padding: 4px 10px;
+                padding: 4px 9px;
                 border-radius: 6px;
-                flex-shrink: 0;
+                letter-spacing: 0.3px;
+            }
+
+            .ref-card-content {
+                padding: 14px 16px;
             }
 
             .ref-card-domain {
                 display: flex;
                 align-items: center;
                 gap: 6px;
-                color: #6b7280;
-                font-size: 12px;
-                overflow: hidden;
+                margin-bottom: 8px;
             }
 
             .ref-card-favicon {
-                width: 16px;
-                height: 16px;
-                border-radius: 4px;
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
                 flex-shrink: 0;
             }
 
             .ref-card-domain-text {
+                font-size: 11px;
+                font-weight: 500;
+                color: #6b7280;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
 
             .ref-card-title {
-                font-size: 14px;
+                font-size: 13.5px;
                 font-weight: 600;
-                color: #1f2937;
-                margin-bottom: 8px;
-                line-height: 1.4;
+                color: #111827;
+                margin-bottom: 10px;
+                line-height: 1.45;
                 display: -webkit-box;
                 -webkit-line-clamp: 2;
                 -webkit-box-orient: vertical;
@@ -119,55 +159,67 @@
             }
 
             .ref-card-url {
-                font-size: 12px;
-                color: #3b82f6;
+                font-size: 11px;
+                font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+                color: #6366f1;
+                background: #f5f5ff;
+                padding: 7px 9px;
+                border-radius: 6px;
+                margin-bottom: 12px;
                 word-break: break-all;
                 display: -webkit-box;
-                -webkit-line-clamp: 2;
+                -webkit-line-clamp: 1;
                 -webkit-box-orient: vertical;
                 overflow: hidden;
                 line-height: 1.4;
-                padding: 8px;
-                background: #f3f4f6;
-                border-radius: 6px;
-                margin-bottom: 12px;
             }
 
             .ref-card-actions {
                 display: flex;
-                gap: 8px;
+                gap: 7px;
             }
 
             .ref-card-btn {
                 flex: 1;
-                padding: 8px 12px;
-                border-radius: 6px;
+                padding: 9px 14px;
+                border-radius: 7px;
                 font-size: 12px;
-                font-weight: 500;
+                font-weight: 600;
                 cursor: pointer;
-                transition: all 0.15s ease;
+                transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
                 text-align: center;
                 text-decoration: none;
                 border: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
             }
 
             .ref-card-btn-primary {
-                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
                 color: white;
+                box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
             }
 
             .ref-card-btn-primary:hover {
-                background: linear-gradient(135deg, #2563eb, #1d4ed8);
-                transform: translateY(-1px);
+                transform: translateY(-1.5px);
+                box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+            }
+
+            .ref-card-btn-primary:active {
+                transform: translateY(0);
             }
 
             .ref-card-btn-secondary {
                 background: #f3f4f6;
-                color: #4b5563;
+                color: #374151;
+                border: 1px solid #e5e7eb;
             }
 
             .ref-card-btn-secondary:hover {
                 background: #e5e7eb;
+                border-color: #d1d5db;
             }
 
             /* Dark mode support */
@@ -175,32 +227,50 @@
                 .ref-hover-card {
                     background: #1f2937;
                     border-color: #374151;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+                }
+
+                .ref-card-image-fallback {
+                    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                }
+
+                .ref-card-domain-text {
+                    color: #9ca3af;
                 }
 
                 .ref-card-title {
-                    color: #f3f4f6;
-                }
-
-                .ref-card-domain {
-                    color: #9ca3af;
+                    color: #f9fafb;
                 }
 
                 .ref-card-url {
                     background: #374151;
-                    color: #60a5fa;
+                    color: #818cf8;
                 }
 
                 .ref-card-btn-secondary {
                     background: #374151;
-                    color: #d1d5db;
+                    color: #e5e7eb;
+                    border-color: #4b5563;
                 }
 
                 .ref-card-btn-secondary:hover {
                     background: #4b5563;
+                    border-color: #6b7280;
                 }
             }
         `;
         document.head.appendChild(style);
+    }
+
+    // Get OG image for URL (using Google's favicon service with larger size as fallback)
+    function getOGImageUrl(url) {
+        try {
+            const urlObj = new URL(url);
+            // Use larger favicon as image preview
+            return `https://www.google.com/s2/favicons?sz=128&domain=${urlObj.hostname}`;
+        } catch {
+            return '';
+        }
     }
 
     // Create hover card element
@@ -210,27 +280,40 @@
         hoverCard = document.createElement('div');
         hoverCard.className = 'ref-hover-card';
         hoverCard.innerHTML = `
-            <div class="ref-card-header">
-                <span class="ref-card-number"></span>
+            <div class="ref-card-image-container">
+                <div class="ref-card-image-fallback">
+                    <img class="ref-card-fallback-icon" src="" alt="" />
+                </div>
+                <span class="ref-card-badge"></span>
+            </div>
+            <div class="ref-card-content">
                 <div class="ref-card-domain">
                     <img class="ref-card-favicon" src="" alt="" />
                     <span class="ref-card-domain-text"></span>
                 </div>
-            </div>
-            <div class="ref-card-title"></div>
-            <div class="ref-card-url"></div>
-            <div class="ref-card-actions">
-                <a class="ref-card-btn ref-card-btn-primary" target="_blank" rel="noopener noreferrer">Open Link ↗</a>
-                <button class="ref-card-btn ref-card-btn-secondary ref-card-scroll-btn">Scroll to Ref ↓</button>
+                <div class="ref-card-title"></div>
+                <div class="ref-card-url"></div>
+                <div class="ref-card-actions">
+                    <a class="ref-card-btn ref-card-btn-primary" target="_blank" rel="noopener noreferrer">
+                        <span>Open</span>
+                        <span>↗</span>
+                    </a>
+                    <button class="ref-card-btn ref-card-btn-secondary ref-card-scroll-btn">
+                        <span>Scroll</span>
+                        <span>↓</span>
+                    </button>
+                </div>
             </div>
         `;
 
         // Keep card visible when hovering over it
         hoverCard.addEventListener('mouseenter', () => {
+            isHoveringCard = true;
             clearTimeout(hideTimeout);
         });
 
         hoverCard.addEventListener('mouseleave', () => {
+            isHoveringCard = false;
             hideHoverCard();
         });
 
@@ -268,9 +351,11 @@
         const card = createHoverCard();
         const domain = extractDomain(ref.url);
         const faviconUrl = getFaviconUrl(ref.url);
+        const ogImageUrl = getOGImageUrl(ref.url);
 
         // Update card content
-        card.querySelector('.ref-card-number').textContent = `[${refNum}]`;
+        card.querySelector('.ref-card-badge').textContent = `[${refNum}]`;
+        card.querySelector('.ref-card-fallback-icon').src = ogImageUrl;
         card.querySelector('.ref-card-favicon').src = faviconUrl;
         card.querySelector('.ref-card-domain-text').textContent = domain;
         card.querySelector('.ref-card-title').textContent = ref.description || `Reference ${refNum}`;
@@ -294,7 +379,7 @@
 
         // Position the card
         const rect = anchorElement.getBoundingClientRect();
-        const cardHeight = 200; // Approximate height
+        const cardHeight = 280; // Approximate height with image
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
 
@@ -316,7 +401,7 @@
         left = rect.left;
 
         // Ensure card doesn't go off-screen horizontally
-        const cardWidth = 350;
+        const cardWidth = 340;
         if (left + cardWidth > window.innerWidth - 16) {
             left = window.innerWidth - cardWidth - 16;
         }
@@ -339,12 +424,17 @@
 
         if (immediate) {
             hoverCard.classList.remove('visible');
+            currentHoveredLink = null;
             return;
         }
 
+        // Delay hiding to allow mouse movement to card
         hideTimeout = setTimeout(() => {
-            hoverCard.classList.remove('visible');
-        }, 150);
+            // Only hide if not hovering over card or link
+            if (!isHoveringCard && !currentHoveredLink) {
+                hoverCard.classList.remove('visible');
+            }
+        }, 200);
     }
 
     // Wrap each reference line in Resources section with a span for precise highlighting
@@ -385,6 +475,7 @@
     // Parse references from the bottom of the page
     function parseReferences() {
         references.clear();
+        referenceLinkLocations.clear();
 
         // First, wrap references with spans for precise targeting
         wrapReferencesWithSpans();
@@ -687,16 +778,26 @@
 
                 // Hover events for card popup
                 link.addEventListener('mouseenter', () => {
-                    link.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+                    currentHoveredLink = link;
+                    link.style.backgroundColor = 'rgba(99, 102, 241, 0.08)';
                     clearTimeout(hoverTimeout);
+                    clearTimeout(hideTimeout);
                     hoverTimeout = setTimeout(() => {
-                        showHoverCard(num, wrapper);
-                    }, 300); // Delay to prevent flickering
+                        if (currentHoveredLink === link) {
+                            showHoverCard(num, wrapper);
+                        }
+                    }, 250); // Delay to prevent flickering
                 });
                 link.addEventListener('mouseleave', () => {
                     link.style.backgroundColor = '';
+                    currentHoveredLink = null;
                     clearTimeout(hoverTimeout);
-                    hideHoverCard();
+                    // Delay hiding to allow moving to card
+                    setTimeout(() => {
+                        if (!isHoveringCard && currentHoveredLink === null) {
+                            hideHoverCard();
+                        }
+                    }, 100);
                 });
 
                 // Create down arrow button to scroll to reference
@@ -805,6 +906,12 @@
                 wrapper.appendChild(link);
                 wrapper.appendChild(arrowBtn);
                 fragment.appendChild(wrapper);
+
+                // Store first occurrence of this reference link for up-arrow navigation
+                if (!referenceLinkLocations.has(num)) {
+                    referenceLinkLocations.set(num, wrapper);
+                }
+
                 lastIndex = markerPattern.lastIndex;
             }
 
@@ -820,11 +927,143 @@
         });
     }
 
+    // Add up arrows to references in Resources section
+    function addUpArrowsToReferences() {
+        // Process all wrapped reference lines
+        document.querySelectorAll('.ref-line[data-ref]').forEach(span => {
+            // Skip if already has up arrow
+            if (span.querySelector('.ref-up-arrow')) return;
+
+            const num = span.dataset.ref;
+            const linkLocation = referenceLinkLocations.get(num);
+
+            if (linkLocation) {
+                // Create up arrow button
+                const upArrow = document.createElement('span');
+                upArrow.className = 'ref-up-arrow';
+                upArrow.textContent = ' ↑';
+                upArrow.title = 'Go back to reference in article';
+                upArrow.style.cssText = `
+                    color: #6366f1;
+                    cursor: pointer;
+                    font-size: 0.9em;
+                    margin-left: 6px;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    transition: all 0.2s;
+                    user-select: none;
+                    display: inline-block;
+                `;
+
+                upArrow.addEventListener('mouseenter', () => {
+                    upArrow.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
+                    upArrow.style.transform = 'translateY(-1px)';
+                });
+
+                upArrow.addEventListener('mouseleave', () => {
+                    upArrow.style.backgroundColor = '';
+                    upArrow.style.transform = 'translateY(0)';
+                });
+
+                upArrow.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    // Scroll to the link location in article
+                    linkLocation.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // Highlight effect
+                    const link = linkLocation.querySelector('.ref-link');
+                    if (link) {
+                        const originalBg = link.style.backgroundColor;
+                        link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                        link.style.transition = 'background-color 0.3s';
+                        setTimeout(() => {
+                            link.style.backgroundColor = originalBg;
+                        }, 1500);
+                    }
+                });
+
+                // Append to the end of the reference line
+                span.appendChild(upArrow);
+            }
+        });
+
+        // Also handle <ol> lists
+        const resourcesHeader = getResourcesHeader();
+        if (resourcesHeader) {
+            let sibling = resourcesHeader.nextElementSibling;
+            while (sibling) {
+                if (sibling.tagName === 'OL') {
+                    const listItems = sibling.querySelectorAll('li');
+                    listItems.forEach((li, index) => {
+                        // Skip if already has up arrow
+                        if (li.querySelector('.ref-up-arrow')) return;
+
+                        const num = String(index + 1);
+                        const linkLocation = referenceLinkLocations.get(num);
+
+                        if (linkLocation) {
+                            const upArrow = document.createElement('span');
+                            upArrow.className = 'ref-up-arrow';
+                            upArrow.textContent = ' ↑';
+                            upArrow.title = 'Go back to reference in article';
+                            upArrow.style.cssText = `
+                                color: #6366f1;
+                                cursor: pointer;
+                                font-size: 0.9em;
+                                margin-left: 6px;
+                                padding: 2px 4px;
+                                border-radius: 3px;
+                                transition: all 0.2s;
+                                user-select: none;
+                                display: inline-block;
+                            `;
+
+                            upArrow.addEventListener('mouseenter', () => {
+                                upArrow.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
+                                upArrow.style.transform = 'translateY(-1px)';
+                            });
+
+                            upArrow.addEventListener('mouseleave', () => {
+                                upArrow.style.backgroundColor = '';
+                                upArrow.style.transform = 'translateY(0)';
+                            });
+
+                            upArrow.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+
+                                linkLocation.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                                const link = linkLocation.querySelector('.ref-link');
+                                if (link) {
+                                    const originalBg = link.style.backgroundColor;
+                                    link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                                    link.style.transition = 'background-color 0.3s';
+                                    setTimeout(() => {
+                                        link.style.backgroundColor = originalBg;
+                                    }, 1500);
+                                }
+                            });
+
+                            li.appendChild(upArrow);
+                        }
+                    });
+                    break;
+                }
+                if (sibling.tagName && sibling.tagName.match(/^H[1-6]$/)) break;
+                sibling = sibling.nextElementSibling;
+            }
+        }
+    }
+
     // Main function
     function processPage() {
         injectStyles();
         parseReferences();
         linkifyReferences();
+        addUpArrowsToReferences();
         console.log(`[ByteByteGo Refs] Found ${references.size} references`);
     }
 
