@@ -32,6 +32,7 @@
     const LAST_UPDATE_CHECK_KEY = 'bytebytego-refs-last-update-check';
     const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
     const SCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/abd3lraouf/bytebytego-reference-linker/main/bytebytego-references.user.js';
+    const CHANGELOG_URL = 'https://raw.githubusercontent.com/abd3lraouf/bytebytego-reference-linker/main/changelog.json';
 
     // Hover card state
     let hoverCard = null;
@@ -1436,93 +1437,137 @@
         }
     }
 
+    // Changelog helper
+    async function fetchChangelog(version) {
+        if (!version || typeof GM_xmlhttpRequest === 'undefined') {
+            return null;
+        }
+
+        return new Promise((resolve) => {
+            const timeoutMs = 5000;
+            const fallbackResolve = () => resolve(null);
+            const timeout = setTimeout(fallbackResolve, timeoutMs);
+
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: CHANGELOG_URL,
+                    timeout: timeoutMs,
+                    onload: (response) => {
+                        clearTimeout(timeout);
+                        if (response.status < 200 || response.status >= 300) {
+                            resolve(null);
+                            return;
+                        }
+                        try {
+                            const data = JSON.parse(response.responseText);
+                            let entry = null;
+
+                            if (Array.isArray(data)) {
+                                entry = data.find(item => item && item.version === version) || null;
+                            } else if (data && typeof data === 'object') {
+                                if (Array.isArray(data.entries)) {
+                                    entry = data.entries.find(item => item && item.version === version) || null;
+                                } else if (data[version]) {
+                                    const raw = data[version];
+                                    entry = { ...raw, version: raw.version || version };
+                                }
+                            }
+
+                            resolve(entry || null);
+                        } catch (err) {
+                            console.error('[ByteByteGo Refs] Error parsing changelog JSON:', err);
+                            resolve(null);
+                        }
+                    },
+                    onerror: () => {
+                        clearTimeout(timeout);
+                        resolve(null);
+                    },
+                    ontimeout: () => {
+                        clearTimeout(timeout);
+                        resolve(null);
+                    }
+                });
+            } catch (err) {
+                clearTimeout(timeout);
+                console.error('[ByteByteGo Refs] Failed to fetch changelog:', err);
+                resolve(null);
+            }
+        });
+    }
+
     // Show update notification toast
     function showUpdateNotification() {
-        const changelog = {
+        const fallbackChangelog = {
             '1.7.0': {
                 title: 'One-Tap Script Updates',
                 changes: [
                     'New toast prompts you to install updates immediately',
                     'Automatic once-daily checks for newer script versions',
-                    'Update button opens the latest script so you stay current'
-                ]
-            },
-            '1.6.2': {
-                title: 'Up Arrow Navigation - Completely Fixed!',
-                changes: [
-                    'Complete rewrite of up arrow navigation system',
-                    'Uses data-ref-link attributes for reliable tracking',
-                    'No longer depends on stored DOM elements',
-                    'Works perfectly even with dynamic page changes',
-                    'Added helpful console warnings if references not found'
-                ]
-            },
-            '1.6.1': {
-                title: 'Bug Fixes & Improvements',
-                changes: [
-                    'Fixed up arrow (↑) navigation not working properly',
-                    'Fixed up arrows sometimes not appearing in references',
-                    'Improved stability when page content changes dynamically',
-                    'Better handling of reference link tracking'
-                ]
-            },
-            '1.6.0': {
-                title: 'Compact Preview Cards & OG Images',
-                changes: [
-                    'Redesigned hover card with compact layout (max 400px)',
-                    'Real OG image fetching from referenced URLs',
-                    'Better URL display with proper truncation',
-                    'Adaptive card: shows image only if available',
-                    'Industry-standard link preview design'
+                    'Update button opens the latest improvements without leaving the page'
                 ]
             }
         };
 
-        const toast = document.createElement('div');
-        toast.className = 'bytebytego-update-toast';
+        (async () => {
+            let entry = null;
 
-        const versionChanges = changelog[SCRIPT_VERSION];
-        if (!versionChanges) return;
+            try {
+                entry = await fetchChangelog(SCRIPT_VERSION);
+            } catch (err) {
+                console.error('[ByteByteGo Refs] Error loading changelog:', err);
+            }
 
-        toast.innerHTML = `
-            <div class="update-toast-header">
-                <div class="update-toast-title">
-                    <span>ByteByteGo Reference Linker</span>
-                    <span class="update-toast-badge">v${SCRIPT_VERSION}</span>
+            if (!entry) {
+                entry = fallbackChangelog[SCRIPT_VERSION] || null;
+            }
+
+            if (!entry || !entry.title || !Array.isArray(entry.changes) || entry.changes.length === 0) {
+                console.info(`[ByteByteGo Refs] No changelog entry available for v${SCRIPT_VERSION}`);
+                return;
+            }
+
+            const toast = document.createElement('div');
+            toast.className = 'bytebytego-update-toast';
+
+            toast.innerHTML = `
+                <div class="update-toast-header">
+                    <div class="update-toast-title">
+                        <span>ByteByteGo Reference Linker</span>
+                        <span class="update-toast-badge">v${SCRIPT_VERSION}</span>
+                    </div>
+                    <button class="update-toast-close" aria-label="Close">×</button>
                 </div>
-                <button class="update-toast-close" aria-label="Close">×</button>
-            </div>
-            <div class="update-toast-content">
-                <strong>${versionChanges.title}</strong>
-                <ul>
-                    ${versionChanges.changes.map(change => `<li>${change}</li>`).join('')}
-                </ul>
-            </div>
-            <div class="update-toast-footer">
-                Hover over references to see preview cards, click ↑ arrows to jump back!
-            </div>
-        `;
+                <div class="update-toast-content">
+                    <strong>${entry.title}</strong>
+                    <ul>
+                        ${entry.changes.map(change => `<li>${change}</li>`).join('')}
+                    </ul>
+                </div>
+                <div class="update-toast-footer">
+                    Hover over references to see preview cards, click ↑ arrows to jump back!
+                </div>
+            `;
 
-        document.body.appendChild(toast);
+            document.body.appendChild(toast);
 
-        // Close button
-        toast.querySelector('.update-toast-close').onclick = () => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        };
-
-        // Show with animation
-        requestAnimationFrame(() => {
-            toast.classList.add('show');
-        });
-
-        // Auto-hide after 10 seconds
-        setTimeout(() => {
-            if (toast.classList.contains('show')) {
+            toast.querySelector('.update-toast-close').onclick = () => {
                 toast.classList.remove('show');
                 setTimeout(() => toast.remove(), 300);
-            }
-        }, 10000);
+            };
+
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+
+            setTimeout(() => {
+                if (toast.classList.contains('show')) {
+                    toast.classList.remove('show');
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 10000);
+        })();
     }
 
     // Check for updates

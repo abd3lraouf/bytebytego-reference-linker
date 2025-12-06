@@ -1,0 +1,13 @@
+{
+  "entries": [
+    {
+      "version": "1.7.0",
+      "title": "One-Tap Script Updates",
+      "changes": [
+        "New toast prompts you to install updates immediately",
+        "Automatic once-daily checks for newer script versions",
+        "Update button opens the latest script so you stay current"
+      ]
+    }
+  ]
+}
