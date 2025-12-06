@@ -1,0 +1,102 @@
+name: Auto Bump Userscript Version
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  bump-and-tag:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump userscript version (patch)
+        id: version
+        run: |
+          set -euo pipefail
+          FILE="bytebytego-references.user.js"
+
+          if [ ! -f "$FILE" ]; then
+            echo "Userscript not found at $FILE"
+            exit 1
+          fi
+
+          node - <<'NODE'
+          const fs = require('fs');
+
+          const file = 'bytebytego-references.user.js';
+          const content = fs.readFileSync(file, 'utf8');
+
+          const headerMatch = content.match(/@version\s+([0-9.]+)/);
+          const scriptConstMatch = content.match(/const\s+SCRIPT_VERSION\s*=\s*['"]([0-9.]+)['"]/);
+
+          if (!headerMatch) {
+            throw new Error('Could not find @version in userscript header');
+          }
+          if (!scriptConstMatch) {
+            throw new Error('Could not find SCRIPT_VERSION constant');
+          }
+
+          const headerVersion = headerMatch[1].trim();
+          const constVersion = scriptConstMatch[1].trim();
+
+          if (headerVersion !== constVersion) {
+            throw new Error(`Header version (${headerVersion}) does not match SCRIPT_VERSION (${constVersion})`);
+          }
+
+          const parts = headerVersion.split('.').map(p => parseInt(p, 10));
+          if (parts.some(Number.isNaN)) {
+            throw new Error(`Invalid numeric version: ${headerVersion}`);
+          }
+          while (parts.length < 3) parts.push(0);
+          parts[2] += 1;
+          const newVersion = parts.join('.');
+
+          let updated = content.replace(/(@version\s+)([0-9.]+)/, `$1${newVersion}`);
+          const scriptReplace = updated.replace(/(const\s+SCRIPT_VERSION\s*=\s*['"])([0-9.]+)(['"])/, `$1${newVersion}$3`);
+
+          if (updated === content || scriptReplace === updated) {
+            throw new Error('Version replacements failed');
+          }
+
+          fs.writeFileSync(file, scriptReplace, 'utf8');
+
+          const tag = `v${newVersion}`;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${newVersion}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
+          console.log(`Bumped version: ${headerVersion} -> ${newVersion} (tag ${tag})`);
+          NODE
+
+      - name: Show git status
+        run: git status --short
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version bump
+        run: |
+          git add bytebytego-references.user.js
+          git commit -m "chore: bump userscript version to v${{ steps.version.outputs.new_version }}"
+
+      - name: Tag release version
+        run: |
+          git tag ${{ steps.version.outputs.tag }}
+
+      - name: Push commit and tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin HEAD
+          git push origin ${{ steps.version.outputs.tag }}
