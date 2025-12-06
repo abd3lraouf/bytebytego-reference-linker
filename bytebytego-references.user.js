@@ -40,6 +40,69 @@
     let currentHoveredLink = null;
     let isHoveringCard = false;
 
+    const CLASS_REF_WRAPPER = 'bbg-ref-wrapper';
+    const CLASS_UP_ARROW = 'bbg-ref-up-arrow';
+    const WRAPPER_PROCESSED_ATTR = 'data-bbg-ref-processed';
+
+    const debouncedProcessPage = debounce(processPage, 400);
+
+    function debounce(fn, delay) {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => fn(...args), delay);
+        };
+    }
+
+    function clearUpArrows() {
+        document.querySelectorAll(`.${CLASS_UP_ARROW}`).forEach(el => el.remove());
+    }
+
+    function scrollToRefLink(num, allowRetry = true) {
+        const refLinkWrapper = document.querySelector(`[data-ref-link="${num}"]`);
+        if (refLinkWrapper) {
+            refLinkWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            const link = refLinkWrapper.querySelector('.ref-link');
+            if (link) {
+                const originalBg = link.style.backgroundColor;
+                link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                link.style.transition = 'background-color 0.3s';
+                setTimeout(() => {
+                    link.style.backgroundColor = originalBg;
+                }, 1500);
+            }
+            return true;
+        }
+
+        if (allowRetry) {
+            processPage();
+            setTimeout(() => scrollToRefLink(num, false), 150);
+        } else {
+            console.warn(`[ByteByteGo Refs] Could not find reference [${num}] in article after retry`);
+        }
+        return false;
+    }
+
+    function findNextHeaderAfter(element) {
+        let sibling = element.nextElementSibling;
+        while (sibling) {
+            if (sibling.tagName && sibling.tagName.match(/^H[1-6]$/)) {
+                return sibling;
+            }
+            sibling = sibling.nextElementSibling;
+        }
+        return null;
+    }
+
+    function isAfter(target, marker) {
+        return !!(marker.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+
+    function isBefore(target, marker) {
+        return !!(target.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+
     // Inject styles for hover card
     function injectStyles() {
         if (document.getElementById('bytebytego-ref-styles')) return;
@@ -950,15 +1013,12 @@
         const resourcesHeader = getResourcesHeader();
         if (!resourcesHeader) return false;
 
-        // Check if element comes after the resources header
-        let current = resourcesHeader.nextElementSibling;
-        while (current) {
-            if (current.contains(element) || current === element) {
-                return true;
-            }
-            current = current.nextElementSibling;
-        }
-        return false;
+        if (!isAfter(element, resourcesHeader)) return false;
+
+        const nextHeader = findNextHeaderAfter(resourcesHeader);
+        if (nextHeader && !isBefore(element, nextHeader)) return false;
+
+        return true;
     }
 
     // Find and linkify [n] markers in the content
@@ -971,32 +1031,30 @@
         );
 
         const nodesToProcess = [];
+        const seenTargets = new Set();
         const markerPattern = /\[(\d+)\]/g;
 
         let node;
         while (node = walker.nextNode()) {
-            // Skip if already processed or inside a link
-            if (node.parentElement.closest('.ref-link-wrapper, a[href]')) continue;
-            // Skip if parent has data-ref-processed marker
-            if (node.parentElement.hasAttribute('data-ref-processed')) continue;
-            // Skip reference definitions at the bottom (in Resources section) - both [n] and n. formats
-            if (node.textContent.trim().match(/^(?:\[\d+\]:?|\d+\.)\s/)) continue;
-            // Skip if inside the Resources/References section
+            if (!node.parentElement) continue;
+            if (node.parentElement.closest(`[data-ref-link]`)) continue;
             if (isInResourcesSection(node.parentElement)) continue;
+            if (node.textContent.trim().match(/^(?:\[\d+\]:?|\d+\.)\s/)) continue;
 
-            if (markerPattern.test(node.textContent)) {
-                nodesToProcess.push(node);
+            const parentLink = node.parentElement.closest('a[href]');
+            const target = parentLink && parentLink.contains(node) ? parentLink : node;
+
+            if (seenTargets.has(target)) continue;
+
+            if (markerPattern.test(target.textContent)) {
+                nodesToProcess.push({ target, parentLink });
+                seenTargets.add(target);
             }
             markerPattern.lastIndex = 0;
         }
 
-        nodesToProcess.forEach(textNode => {
-            const text = textNode.textContent;
-            const parent = textNode.parentElement;
-
-            // Don't process if parent is already a link
-            if (parent.tagName === 'A') return;
-
+        nodesToProcess.forEach(({ target, parentLink }) => {
+            const text = target.textContent;
             const fragment = document.createDocumentFragment();
             let lastIndex = 0;
             let match;
@@ -1005,19 +1063,18 @@
             while ((match = markerPattern.exec(text)) !== null) {
                 const num = match[1];
                 const ref = references.get(num);
+                const existingHref = parentLink ? parentLink.href : null;
 
-                // Add text before the match
                 if (match.index > lastIndex) {
                     fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
                 }
 
-                // Create wrapper span for link + arrow
                 const wrapper = document.createElement('span');
-                wrapper.className = 'ref-link-wrapper';
-                wrapper.setAttribute('data-ref-link', num); // Add unique identifier
+                wrapper.className = `ref-link-wrapper ${CLASS_REF_WRAPPER}`;
+                wrapper.setAttribute('data-ref-link', num);
+                wrapper.setAttribute(WRAPPER_PROCESSED_ATTR, 'true');
                 wrapper.style.cssText = 'display: inline-flex; align-items: center; gap: 1px;';
 
-                // Create the main link element
                 const link = document.createElement('a');
                 link.textContent = match[0];
                 link.className = 'ref-link';
@@ -1027,13 +1084,17 @@
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
                     link.title = `${ref.description}\n(Click to open link)`;
+                } else if (existingHref) {
+                    link.href = existingHref;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.title = ref ? ref.description : 'Reference link';
                 } else {
                     link.href = '#';
                     link.title = ref ? ref.description : 'Reference not found';
                     link.addEventListener('click', (e) => e.preventDefault());
                 }
 
-                // Apply styles to main link
                 link.style.cssText = `
                     color: #3b82f6;
                     text-decoration: none;
@@ -1044,7 +1105,6 @@
                     transition: background-color 0.2s;
                 `;
 
-                // Hover events for card popup
                 link.addEventListener('mouseenter', () => {
                     currentHoveredLink = link;
                     link.style.backgroundColor = 'rgba(99, 102, 241, 0.08)';
@@ -1054,13 +1114,12 @@
                         if (currentHoveredLink === link) {
                             showHoverCard(num, wrapper);
                         }
-                    }, 250); // Delay to prevent flickering
+                    }, 250);
                 });
                 link.addEventListener('mouseleave', () => {
                     link.style.backgroundColor = '';
                     currentHoveredLink = null;
                     clearTimeout(hoverTimeout);
-                    // Delay hiding to allow moving to card
                     setTimeout(() => {
                         if (!isHoveringCard && currentHoveredLink === null) {
                             hideHoverCard();
@@ -1068,7 +1127,6 @@
                     }, 100);
                 });
 
-                // Create down arrow button to scroll to reference
                 const arrowBtn = document.createElement('span');
                 arrowBtn.textContent = '↓';
                 arrowBtn.className = 'ref-scroll-btn';
@@ -1094,30 +1152,26 @@
                     e.preventDefault();
                     e.stopPropagation();
 
-                    // First check if we have a stored element for this reference
-                    const ref = references.get(num);
-                    if (ref && ref.element) {
-                        ref.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const refData = references.get(num);
+                    if (refData && refData.element) {
+                        refData.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                        // Highlight effect
-                        const originalBg = ref.element.style.backgroundColor;
-                        ref.element.style.backgroundColor = '#fef08a';
-                        ref.element.style.transition = 'background-color 0.3s';
+                        const originalBg = refData.element.style.backgroundColor;
+                        refData.element.style.backgroundColor = '#fef08a';
+                        refData.element.style.transition = 'background-color 0.3s';
                         setTimeout(() => {
-                            ref.element.style.backgroundColor = originalBg;
+                            refData.element.style.backgroundColor = originalBg;
                         }, 2000);
                         return;
                     }
 
-                    // Fallback: Find and scroll to the reference in Resources section
                     const resourcesHeader = getResourcesHeader();
                     if (resourcesHeader) {
-                        // First check for <ol> list (numbered list)
                         let sibling = resourcesHeader.nextElementSibling;
                         while (sibling) {
                             if (sibling.tagName === 'OL') {
                                 const listItems = sibling.querySelectorAll('li');
-                                const targetIndex = parseInt(num) - 1; // 0-indexed
+                                const targetIndex = parseInt(num, 10) - 1;
                                 if (listItems[targetIndex]) {
                                     const targetElement = listItems[targetIndex];
                                     targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1135,13 +1189,12 @@
                             sibling = sibling.nextElementSibling;
                         }
 
-                        // Second, look for text patterns in <p> or <div>
                         const resourcesSection = getResourcesSection();
                         if (resourcesSection) {
                             const refPatternBracket = new RegExp(`\\[${num}\\]`);
                             const refPatternDot = new RegExp(`(^|\\s)${num}\\.\\s`);
 
-                            const walker = document.createTreeWalker(
+                            const sectionWalker = document.createTreeWalker(
                                 resourcesSection,
                                 NodeFilter.SHOW_TEXT,
                                 null,
@@ -1149,9 +1202,9 @@
                             );
 
                             let textNode;
-                            while (textNode = walker.nextNode()) {
-                                const text = textNode.textContent;
-                                if (refPatternBracket.test(text) || refPatternDot.test(text)) {
+                            while (textNode = sectionWalker.nextNode()) {
+                                const textContent = textNode.textContent;
+                                if (refPatternBracket.test(textContent) || refPatternDot.test(textContent)) {
                                     const targetElement = textNode.parentElement;
                                     targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
@@ -1166,7 +1219,6 @@
                             }
                         }
 
-                        // Final fallback: scroll to header
                         resourcesHeader.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
                 });
@@ -1175,97 +1227,68 @@
                 wrapper.appendChild(arrowBtn);
                 fragment.appendChild(wrapper);
 
-                // Note: Reference location is tracked via data-ref-link attribute
-                // which is more reliable than storing DOM elements
-
                 lastIndex = markerPattern.lastIndex;
             }
 
-            // Add remaining text
             if (lastIndex < text.length) {
                 fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
             }
 
-            // Replace the text node
             if (fragment.childNodes.length > 0) {
-                parent.replaceChild(fragment, textNode);
-                // Mark parent as processed to avoid re-processing
-                parent.setAttribute('data-ref-processed', 'true');
+                const replacementTarget = parentLink || target;
+                replacementTarget.replaceWith(fragment);
             }
         });
     }
 
     // Add up arrows to references in Resources section
     function addUpArrowsToReferences() {
-        // Process all wrapped reference lines
-        document.querySelectorAll('.ref-line[data-ref]').forEach(span => {
-            // Skip if already has up arrow
-            if (span.querySelector('.ref-up-arrow')) return;
+        clearUpArrows();
 
-            const num = span.dataset.ref;
-
-            // Check if this reference exists in the article
+        const appendArrow = (num, container) => {
             const refLinkExists = document.querySelector(`[data-ref-link="${num}"]`);
+            if (!refLinkExists) return;
 
-            if (refLinkExists) {
-                // Create up arrow button
-                const upArrow = document.createElement('span');
-                upArrow.className = 'ref-up-arrow';
-                upArrow.textContent = ' ↑';
-                upArrow.title = 'Go back to reference in article';
-                upArrow.style.cssText = `
-                    color: #6366f1;
-                    cursor: pointer;
-                    font-size: 0.9em;
-                    margin-left: 6px;
-                    padding: 2px 4px;
-                    border-radius: 3px;
-                    transition: all 0.2s;
-                    user-select: none;
-                    display: inline-block;
-                `;
+            const upArrow = document.createElement('span');
+            upArrow.className = CLASS_UP_ARROW;
+            upArrow.textContent = ' ↑';
+            upArrow.title = 'Go back to reference in article';
+            upArrow.style.cssText = `
+                color: #6366f1;
+                cursor: pointer;
+                font-size: 0.9em;
+                margin-left: 6px;
+                padding: 2px 4px;
+                border-radius: 3px;
+                transition: all 0.2s;
+                user-select: none;
+                display: inline-block;
+            `;
 
-                upArrow.addEventListener('mouseenter', () => {
-                    upArrow.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
-                    upArrow.style.transform = 'translateY(-1px)';
-                });
+            upArrow.addEventListener('mouseenter', () => {
+                upArrow.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
+                upArrow.style.transform = 'translateY(-1px)';
+            });
 
-                upArrow.addEventListener('mouseleave', () => {
-                    upArrow.style.backgroundColor = '';
-                    upArrow.style.transform = 'translateY(0)';
-                });
+            upArrow.addEventListener('mouseleave', () => {
+                upArrow.style.backgroundColor = '';
+                upArrow.style.transform = 'translateY(0)';
+            });
 
-                upArrow.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+            upArrow.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                scrollToRefLink(num, true);
+            });
 
-                    // Find the reference link in the article dynamically
-                    const refLinkWrapper = document.querySelector(`[data-ref-link="${num}"]`);
-                    if (refLinkWrapper) {
-                        // Scroll to the link location in article
-                        refLinkWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            container.appendChild(upArrow);
+        };
 
-                        // Highlight effect
-                        const link = refLinkWrapper.querySelector('.ref-link');
-                        if (link) {
-                            const originalBg = link.style.backgroundColor;
-                            link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-                            link.style.transition = 'background-color 0.3s';
-                            setTimeout(() => {
-                                link.style.backgroundColor = originalBg;
-                            }, 1500);
-                        }
-                    } else {
-                        console.warn(`[ByteByteGo Refs] Could not find reference [${num}] in article`);
-                    }
-                });
-
-                // Append to the end of the reference line
-                span.appendChild(upArrow);
-            }
+        document.querySelectorAll('.ref-line[data-ref]').forEach(span => {
+            const num = span.dataset.ref;
+            appendArrow(num, span);
         });
 
-        // Also handle <ol> lists
         const resourcesHeader = getResourcesHeader();
         if (resourcesHeader) {
             let sibling = resourcesHeader.nextElementSibling;
@@ -1273,66 +1296,8 @@
                 if (sibling.tagName === 'OL') {
                     const listItems = sibling.querySelectorAll('li');
                     listItems.forEach((li, index) => {
-                        // Skip if already has up arrow
-                        if (li.querySelector('.ref-up-arrow')) return;
-
                         const num = String(index + 1);
-
-                        // Check if this reference exists in the article
-                        const refLinkExists = document.querySelector(`[data-ref-link="${num}"]`);
-
-                        if (refLinkExists) {
-                            const upArrow = document.createElement('span');
-                            upArrow.className = 'ref-up-arrow';
-                            upArrow.textContent = ' ↑';
-                            upArrow.title = 'Go back to reference in article';
-                            upArrow.style.cssText = `
-                                color: #6366f1;
-                                cursor: pointer;
-                                font-size: 0.9em;
-                                margin-left: 6px;
-                                padding: 2px 4px;
-                                border-radius: 3px;
-                                transition: all 0.2s;
-                                user-select: none;
-                                display: inline-block;
-                            `;
-
-                            upArrow.addEventListener('mouseenter', () => {
-                                upArrow.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
-                                upArrow.style.transform = 'translateY(-1px)';
-                            });
-
-                            upArrow.addEventListener('mouseleave', () => {
-                                upArrow.style.backgroundColor = '';
-                                upArrow.style.transform = 'translateY(0)';
-                            });
-
-                            upArrow.addEventListener('click', (e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-
-                                // Find the reference link in the article dynamically
-                                const refLinkWrapper = document.querySelector(`[data-ref-link="${num}"]`);
-                                if (refLinkWrapper) {
-                                    refLinkWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                                    const link = refLinkWrapper.querySelector('.ref-link');
-                                    if (link) {
-                                        const originalBg = link.style.backgroundColor;
-                                        link.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-                                        link.style.transition = 'background-color 0.3s';
-                                        setTimeout(() => {
-                                            link.style.backgroundColor = originalBg;
-                                        }, 1500);
-                                    }
-                                } else {
-                                    console.warn(`[ByteByteGo Refs] Could not find reference [${num}] in article`);
-                                }
-                            });
-
-                            li.appendChild(upArrow);
-                        }
+                        appendArrow(num, li);
                     });
                     break;
                 }
@@ -1593,25 +1558,26 @@
     checkForScriptUpdate();
 
     // Initial run with delay to ensure page is loaded
-    setTimeout(processPage, 1000);
+    setTimeout(() => debouncedProcessPage(), 1000);
 
     // Re-run on dynamic content changes
     const observer = new MutationObserver((mutations) => {
         let shouldProcess = false;
         for (const mutation of mutations) {
-            if (mutation.addedNodes.length > 0) {
+            if (mutation.addedNodes.length > 0 || mutation.type === 'characterData') {
                 shouldProcess = true;
                 break;
             }
         }
         if (shouldProcess) {
-            setTimeout(processPage, 500);
+            debouncedProcessPage();
         }
     });
 
     observer.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
+        characterData: true
     });
 
 })();
