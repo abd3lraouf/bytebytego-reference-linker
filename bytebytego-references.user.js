@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ByteByteGo Reference Linker
 // @namespace    https://github.com/abd3lraouf
-// @version      1.6.0
+// @version      1.6.1
 // @description  Converts [n] reference markers into clickable links on ByteByteGo courses. Click the reference to open the URL, or click the arrow to scroll to the References section.
 // @author       abd3lraouf
 // @license      MIT
@@ -26,7 +26,7 @@
     const referenceLinkLocations = new Map();
 
     // Script version for update notifications
-    const SCRIPT_VERSION = '1.6.0';
+    const SCRIPT_VERSION = '1.6.1';
     const VERSION_KEY = 'bytebytego-refs-version';
 
     // Hover card state
@@ -688,7 +688,8 @@
     // Parse references from the bottom of the page
     function parseReferences() {
         references.clear();
-        referenceLinkLocations.clear();
+        // Note: Don't clear referenceLinkLocations here as it's populated by linkifyReferences
+        // and needs to persist for up-arrow navigation
 
         // First, wrap references with spans for precise targeting
         wrapReferencesWithSpans();
@@ -925,6 +926,8 @@
         while (node = walker.nextNode()) {
             // Skip if already processed or inside a link
             if (node.parentElement.closest('.ref-link-wrapper, a[href]')) continue;
+            // Skip if parent has data-ref-processed marker
+            if (node.parentElement.hasAttribute('data-ref-processed')) continue;
             // Skip reference definitions at the bottom (in Resources section) - both [n] and n. formats
             if (node.textContent.trim().match(/^(?:\[\d+\]:?|\d+\.)\s/)) continue;
             // Skip if inside the Resources/References section
@@ -1136,6 +1139,8 @@
             // Replace the text node
             if (fragment.childNodes.length > 0) {
                 parent.replaceChild(fragment, textNode);
+                // Mark parent as processed to avoid re-processing
+                parent.setAttribute('data-ref-processed', 'true');
             }
         });
     }
@@ -1274,6 +1279,15 @@
     // Show update notification toast
     function showUpdateNotification() {
         const changelog = {
+            '1.6.1': {
+                title: 'Bug Fixes & Improvements',
+                changes: [
+                    'Fixed up arrow (↑) navigation not working properly',
+                    'Fixed up arrows sometimes not appearing in references',
+                    'Improved stability when page content changes dynamically',
+                    'Better handling of reference link tracking'
+                ]
+            },
             '1.6.0': {
                 title: 'Compact Preview Cards & OG Images',
                 changes: [
@@ -1307,7 +1321,7 @@
                 </ul>
             </div>
             <div class="update-toast-footer">
-                Click any reference to see the new preview card!
+                Hover over references to see preview cards, click ↑ arrows to jump back!
             </div>
         `;
 
