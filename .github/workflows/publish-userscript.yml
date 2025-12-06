@@ -5,6 +5,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_run:
+    workflows:
+      - Auto Bump Userscript Version
+    types:
+      - completed
 
 permissions:
   contents: write
