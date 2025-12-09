@@ -22,6 +22,8 @@ A Tampermonkey userscript that enhances ByteByteGo course pages by converting `[
 
 ## Demo
 
+![Preview Card](assets/preview-card.png)
+
 Before:
 ```
 ...which significantly reduced load times [22].
